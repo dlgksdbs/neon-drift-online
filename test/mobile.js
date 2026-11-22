@@ -360,6 +360,25 @@ await page.mouse.up();
 const leftReleased = await waitPage(page, (s) => Math.abs(s.inputSteer) < 0.03, 2500);
 ok('왼쪽 조향 후에도 복원', Math.abs(leftReleased.inputSteer) < 0.03, leftReleased.inputSteer);
 
+// 실제 터치(손가락) 드래그로도 조향된다 — 안드로이드 폰 입력 경로
+await resetOnTrack(page);
+const touchBefore = await stateOf(page);
+{
+  const box = await (await page.$('#wheel')).boundingBox();
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2, r = box.width * 0.36;
+  const pt = (deg) => ({ x: cx + Math.sin((deg * Math.PI) / 180) * r, y: cy - Math.cos((deg * Math.PI) / 180) * r });
+  const a = pt(0);
+  await page.touchscreen.touchStart(a.x, a.y);
+  for (let i = 1; i <= 8; i++) { const q = pt((75 * i) / 8); await page.touchscreen.touchMove(q.x, q.y); await sleep(18); }
+  await sleep(240);
+  const touchHeld = await stateOf(page);
+  ok('터치 드래그로 핸들 조향', touchHeld.inputSteer > 0.35, touchHeld.inputSteer);
+  ok('터치 조향 시 즉시 회전', Math.abs(touchHeld.h - touchBefore.h) > 0.1, { dh: (touchHeld.h - touchBefore.h).toFixed(3) });
+  await page.touchscreen.touchEnd();
+  const touchUp = await waitPage(page, (st) => Math.abs(st.inputSteer) < 0.03, 2500);
+  ok('터치를 떼면 조향 0', Math.abs(touchUp.inputSteer) < 0.03, touchUp.inputSteer);
+}
+
 // 키보드 조향도 핸들 시각 회전에 반영
 await page.keyboard.down('ArrowRight');
 await sleep(350);
