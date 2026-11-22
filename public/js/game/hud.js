@@ -1,20 +1,21 @@
 import { formatTime } from '../core/progress.js';
 
 /* =============================================================================
-   hud.js — DOM HUD · 미니맵 · 메시지
+   hud.js — DOM HUD · 실시간 순위표 · 미니맵 · 메시지
    ============================================================================= */
 
 const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 export class Hud {
   constructor(track) {
     this.track = track;
     this.el = {
-      hud: $('hud'), pos: $('posVal'), lap: $('lapVal'), lapTime: $('lapTime'), best: $('bestLap'),
-      speed: $('speedVal'), driftFill: $('driftFill'), nitroFill: $('nitroFill'),
-      driftLabel: $('driftLabel'), camMode: $('camMode'), msg: $('msgBox'),
+      hud: $('hud'), pos: $('posVal'), posTotal: $('posTotal'), lap: $('lapVal'),
+      lapTime: $('lapTime'), best: $('bestLap'), speed: $('speedVal'),
+      nitroFill: $('nitroFill'), camMode: $('camMode'), msg: $('msgBox'),
       minimap: $('minimap'), speedlines: $('speedlines'), flash: $('flash'),
-      btnDrift: $('btnDrift'), btnNitro: $('btnNitro'),
+      boardList: $('boardList'), boardLap: $('boardLap'),
     };
     this.map = this.el.minimap.getContext('2d');
     this.base = document.createElement('canvas');
@@ -22,6 +23,7 @@ export class Hud {
     this._buildMinimapBase();
     this.msgTimer = 0;
     this.lastMsg = '';
+    this._boardSig = '';
   }
 
   _buildMinimapBase() {
@@ -60,20 +62,38 @@ export class Hud {
   show() { this.el.hud.classList.remove('hidden'); }
   hide() { this.el.hud.classList.add('hidden'); }
 
-  setPos(p) { this.el.pos.textContent = String(p); }
-  setLap(lap, laps) { this.el.lap.textContent = `${Math.min(lap, laps)}/${laps}`; }
+  setPos(p, total) {
+    this.el.pos.textContent = String(p);
+    if (total) this.el.posTotal.textContent = `/${total}`;
+  }
+  setLap(lap, laps) {
+    this.el.lap.textContent = `${Math.min(lap, laps)}/${laps}`;
+    this.el.boardLap.textContent = `LAP ${Math.min(lap, laps)}/${laps}`;
+  }
   setTime(t, best) {
     this.el.lapTime.textContent = formatTime(t);
     this.el.best.textContent = 'BEST ' + formatTime(best);
   }
   setSpeed(k) { this.el.speed.textContent = String(Math.round(k)); }
-  setDrift(gauge, color) {
-    this.el.driftFill.style.width = `${Math.max(0, Math.min(100, gauge))}%`;
-    this.el.driftLabel.textContent = gauge >= 90 ? 'GOLD!' : gauge >= 60 ? 'PURPLE' : gauge >= 30 ? 'BLUE' : 'DRIFT';
-    this.el.driftLabel.style.color = color || 'rgba(230,245,255,.85)';
-  }
   setNitro(fuel) { this.el.nitroFill.style.width = `${Math.max(0, Math.min(100, fuel))}%`; }
   setCam(mode) { this.el.camMode.textContent = mode === 'first' ? '1인칭' : '3인칭'; }
+
+  /* 실시간 순위표: rows = [{rank, name, color, me, lapText, done}] (위가 1위) */
+  setBoard(rows) {
+    const sig = rows.map((r) => `${r.rank}:${r.name}:${r.lapText}:${r.me ? 1 : 0}:${r.done ? 1 : 0}`).join('|');
+    this.el.boardList.dataset.sig = sig;
+    if (sig === this._boardSig) return;
+    this._boardSig = sig;
+    let html = '';
+    for (const r of rows) {
+      const cls = ['p' + r.rank, r.me ? 'me' : '', r.done ? 'done' : ''].filter(Boolean).join(' ');
+      html += `<li class="${cls}"><span class="rk">${r.rank}</span>`
+        + `<span class="dot" style="color:${r.color};background:${r.color}"></span>`
+        + `<span class="nm">${esc(r.name)}</span>`
+        + `<span class="lp">${esc(r.lapText)}</span></li>`;
+    }
+    this.el.boardList.innerHTML = html;
+  }
 
   message(text, ms = 1200) {
     this.el.msg.textContent = text;

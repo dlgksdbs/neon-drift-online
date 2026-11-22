@@ -1,5 +1,5 @@
 /* =============================================================================
-   ai.js — AI 레이서 (순수 JS): 레이싱 라인 추종 + 코너 속도 계획 + 드리프트/부스터
+   ai.js — AI 레이서 (순수 JS): 레이싱 라인 추종 + 코너 속도 계획 + 부스터
    ============================================================================= */
 
 function wrapAngle(a) {
@@ -60,7 +60,6 @@ export function createAIProfile(seed = 1) {
   return {
     seed,
     skill: 0.87 + r(1) * 0.12,          // 코너 속도 계수
-    aggression: 0.4 + r(2) * 0.5,       // 드리프트/부스터 사용 빈도
     laneBias: (r(3) - 0.5) * 2.2,       // 라인 좌우 편향
     wobble: r(4) * 1.4,
     boostSkill: 0.55 + r(5) * 0.45,
@@ -78,7 +77,7 @@ export function aiInput(ai, car, s, t, track) {
   const px = track.xs[i] + nx * off, pz = track.zs[i] + nz * off;
   const desired = Math.atan2(px - car.x, pz - car.z);
   const err = wrapAngle(desired - car.h);
-  let steer = Math.max(-1, Math.min(1, err * 2.4));
+  let steer = Math.max(-1, Math.min(1, err * 1.7));
 
   // 코너 속도 계획
   const ahead = minRadiusAhead(track, s, 70);
@@ -91,14 +90,9 @@ export function aiInput(ai, car, s, t, track) {
   else if (speed > targetSpeed) { throttle = 0.35; }
   if (Math.abs(err) > 0.55 && speed > 26) { throttle = Math.min(throttle, 0.25); brake = Math.max(brake, 0.4); }
 
-  // 드리프트: 곧 만나는 코너가 충분히 급하고 속도가 있을 때
-  const drift = !!(
-    ahead.minR < 78 && speed > 21 && Math.abs(steer) > 0.3 && ai.aggression > 0.35
-  ) || (car.drifting && Math.abs(err) > 0.12 && Math.abs(steer) > 0.2);
-
   // 부스터: 직선이 충분히 길 때
   const straight = minRadiusAhead(track, s, 95).minR;
   const boost = !!(car.boostFuel > 35 && straight > 220 && speed > 22 && ai.boostSkill > 0.5);
 
-  return { throttle, brake, steer, drift, boost };
+  return { throttle, brake, steer, boost };
 }

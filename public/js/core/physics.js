@@ -1,46 +1,30 @@
 /* =============================================================================
-   physics.js — 아케이드 드리프트 차량 물리 (순수 JS)
+   physics.js — 아케이드 카트형 차량 물리 (순수 JS)
    - world 좌표: XZ, heading h → 전방 = (sin h, cos h)
-   - 속도는 월드 벡터로 유지하고, heading 회전 + 횡방향 그립 감쇠로 미끄러짐을 만든다.
+   - 조향은 누른 방향으로 바로 꺾인다: heading 이 즉시 돌고, 속도는 항상 차체
+     진행 방향으로 정렬된다(횡슬립 최소). 미끄러짐·드리프트 상태는 없다.
    ============================================================================= */
 
 export const CAR_SPECS = {
   coupe: {
     key: 'coupe', name: '네온 쿠페', tag: '밸런스', desc: '다루기 쉬운 올라운더',
     accel: 17, brakeDecel: 30, maxSpeed: 52, reverseMax: 12,
-    grip: 11.5, driftGrip: 3.2, steerRate: 2.35, driftSteerMul: 1.32,
-    driftCharge: 1.0, boostMul: 1.0, nitroAccel: 14, topBoostMul: 1.24,
+    grip: 26, steerRate: 2.9, nitroAccel: 14, topBoostMul: 1.24,
   },
   gt: {
-    key: 'gt', name: '드리프트 GT', tag: '드리프트', desc: '미끄러짐이 길고 게이지가 빨리 찬다',
+    key: 'gt', name: '코너 GT', tag: '코너링', desc: '코너에서 민첩하게 붙는다',
     accel: 16, brakeDecel: 28, maxSpeed: 50, reverseMax: 12,
-    grip: 9.6, driftGrip: 2.05, steerRate: 2.55, driftSteerMul: 1.42,
-    driftCharge: 1.38, boostMul: 1.15, nitroAccel: 13.5, topBoostMul: 1.22,
+    grip: 28, steerRate: 3.15, nitroAccel: 13.5, topBoostMul: 1.22,
   },
   hyper: {
-    key: 'hyper', name: '하이퍼카', tag: '최고속', desc: '직선이 강하고 그립이 높다',
+    key: 'hyper', name: '하이퍼카', tag: '최고속', desc: '직선이 강하고 안정적',
     accel: 19, brakeDecel: 32, maxSpeed: 58, reverseMax: 12,
-    grip: 12.5, driftGrip: 3.9, steerRate: 2.2, driftSteerMul: 1.26,
-    driftCharge: 0.86, boostMul: 1.05, nitroAccel: 16, topBoostMul: 1.28,
+    grip: 24, steerRate: 2.7, nitroAccel: 16, topBoostMul: 1.28,
   },
 };
 
-export const DRIFT_TIERS = [
-  { key: 'none', name: '없음', min: 0, color: '#7f8c9b', boost: 0, time: 0 },
-  { key: 'blue', name: '블루', min: 30, color: '#39a7ff', boost: 5, time: 1.05 },
-  { key: 'purple', name: '퍼플', min: 60, color: '#b45cff', boost: 8, time: 1.65 },
-  { key: 'gold', name: '골드', min: 90, color: '#ffcc33', boost: 11, time: 2.35 },
-];
-
 export const WALL_LIMIT = 8.35;      // 차량 중심이 갈 수 있는 최대 |lateral|
 export const GRAVITY_NONE = 0;
-
-export function driftTier(gauge) {
-  if (gauge >= DRIFT_TIERS[3].min) return DRIFT_TIERS[3];
-  if (gauge >= DRIFT_TIERS[2].min) return DRIFT_TIERS[2];
-  if (gauge >= DRIFT_TIERS[1].min) return DRIFT_TIERS[1];
-  return DRIFT_TIERS[0];
-}
 
 export function createCar(spec, opts = {}) {
   return {
@@ -48,11 +32,10 @@ export function createCar(spec, opts = {}) {
     x: opts.x || 0, z: opts.z || 0, h: opts.h || 0,
     vx: 0, vz: 0,
     speed: 0, slip: 0,
-    drifting: false, driftTime: 0, gauge: 0,
     boostTime: 0, boostFuel: 100, nitroActive: false,
-    throttle: 0, steer: 0,
+    throttle: 0, steer: 0, brake: 0,
     wallHit: 0, padCooldown: 0, lastPad: -1,
-    padFlash: 0, driftTierKey: 'none',
+    padFlash: 0, padEvent: -1,
     distance: 0, finished: false,
     wheelSpin: 0,
   };
@@ -72,7 +55,7 @@ export function stepCar(car, input, dt, world = {}) {
   const throttle = Math.max(0, Math.min(1, input.throttle || 0));
   const brake = Math.max(0, Math.min(1, input.brake || 0));
   const steerIn = Math.max(-1, Math.min(1, input.steer || 0));
-  car.throttle = throttle; car.steer = steerIn;
+  car.throttle = throttle; car.steer = steerIn; car.brake = brake;
 
   // --- 니트로 연료
   if (input.boost && car.boostFuel > 2 && !car.finished) {
@@ -86,32 +69,13 @@ export function stepCar(car, input, dt, world = {}) {
   const boosting = car.boostTime > 0 || car.nitroActive;
   if (car.boostTime > 0) car.boostTime = Math.max(0, car.boostTime - dt);
 
-  // --- 드리프트 상태
-  const canDrift = !!input.drift && Math.abs(vf) > 13 && !car.finished;
-  const wasDrifting = car.drifting;
-  car.drifting = canDrift && (Math.abs(steerIn) > 0.12 || car.driftTime > 0.08) && Math.abs(steerIn) > 0.05;
-  if (car.drifting && !wasDrifting) car.driftTime = 0;
-  if (car.drifting) car.driftTime += dt;
-
-  // 드리프트 종료 → 충전 단계에 따른 미니 터보
-  if (wasDrifting && !car.drifting) {
-    const tier = driftTier(car.gauge);
-    if (tier.boost > 0) {
-      car.boostTime = Math.max(car.boostTime, tier.time * spec.boostMul);
-      vf += tier.boost;
-      car.driftTierKey = tier.key;
-      car.driftReleased = tier.key;
-    }
-    car.gauge = 0;
-    car.driftTime = 0;
-  }
-
-  // --- 조향
-  const speedFactor = Math.min(1, Math.abs(vf) / 9) * (1 - 0.28 * Math.min(1, Math.abs(vf) / spec.maxSpeed));
-  let steerRate = spec.steerRate * (car.drifting ? spec.driftSteerMul : 1);
+  // --- 조향: 누르는 즉시 차체가 그 방향으로 돈다.
+  // 3 m/s 부터 완전 조향, 최고속에서도 20%만 줄어 코너를 놓치지 않는다.
+  const speedFactor = Math.min(1, Math.abs(vf) / 3);
+  const speedNarrow = 1 - 0.2 * Math.min(1, Math.abs(vf) / spec.maxSpeed);
+  const steerRate = spec.steerRate * speedNarrow;
   const dir = vf < -0.5 ? -1 : 1;
-  let yaw = steerIn * steerRate * speedFactor * dir;
-  if (brake > 0.5 && Math.abs(vf) > 18 && !car.drifting) yaw *= 1.12; // 브레이크 턴 살짝
+  const yaw = steerIn * steerRate * speedFactor * dir;
   car.h += yaw * dt;
 
   // --- 추진 / 제동
@@ -129,23 +93,10 @@ export function stepCar(car, input, dt, world = {}) {
   // 저항
   const drag = boosting ? 0.12 : 0.28;
   vf *= Math.exp(-drag * dt);
-  if (car.drifting) vf *= Math.exp(-0.16 * dt);
 
-  // --- 횡방향 그립(미끄러짐 유지)
-  const grip = car.drifting ? spec.driftGrip : spec.grip;
-  vl *= Math.exp(-grip * dt);
-  // 회전 중 원심력 느낌: 조향이 클수록 살짝 밖으로 밀림
-  vl += yaw * vf * dt * (car.drifting ? 0.55 : 0.10);
-
-  // --- 드리프트 게이지
-  const slipAngle = Math.abs(Math.atan2(vl, Math.max(4, Math.abs(vf))));
-  car.slip = slipAngle;
-  if (car.drifting) {
-    const slideFactor = Math.min(1, slipAngle / 0.28);
-    car.gauge = Math.min(100, car.gauge + dt * (16 + 30 * Math.abs(steerIn) + 0.5 * Math.abs(vf)) * spec.driftCharge * (0.35 + 0.65 * slideFactor));
-  } else if (car.gauge > 0) {
-    car.gauge = Math.max(0, car.gauge - dt * 26);
-  }
+  // --- 횡방향 그립: 옆으로 흐르는 속도를 빠르게 잡아 차체 방향으로 정렬한다.
+  vl *= Math.exp(-spec.grip * dt);
+  car.slip = Math.abs(Math.atan2(vl, Math.max(4, Math.abs(vf))));
 
   // 새 heading 으로 재조립
   const nfx = Math.sin(car.h), nfz = Math.cos(car.h);
@@ -220,19 +171,16 @@ export function kmh(car) {
 /* 여러 서브스텝으로 안정적으로 진행 */
 export function stepCarFixed(car, input, dtTotal, world, step = 1 / 120) {
   let left = Math.min(dtTotal, 0.1);
-  const events = { miniTurbo: null, pad: -1, wall: 0, nitro: false };
+  const events = { pad: -1, wall: 0, nitro: false };
   let guard = 0;
   while (left > 1e-6 && guard++ < 24) {
     const dt = Math.min(step, left);
     left -= dt;
-    const before = car.boostTime;
-    const wasPad = car.lastPad, padFlashBefore = car.padFlash;
+    const padFlashBefore = car.padFlash;
     stepCar(car, input, dt, world);
-    if (car.boostTime > before + 0.05) events.miniTurbo = car.driftReleased || 'nitro';
     if (car.padFlash > padFlashBefore + 0.5) events.pad = car.lastPad;
     if (car.wallHit > events.wall) events.wall = car.wallHit;
     if (car.nitroActive) events.nitro = true;
   }
-  car.driftReleased = null;
   return events;
 }

@@ -1,9 +1,11 @@
 /* =============================================================================
    main.js — NEON DRIFT 실행부: 메뉴 · 솔로(AI 3) · 친구 대결(WebSocket) · HUD · 카메라
+   - 원형 핸들 조향 (3D 운전교실 스타일)
+   - 니트로 / 브레이크 / 실시간 순위표
    ============================================================================= */
 import * as THREE from 'three';
 import { TRACK, buildPads, nearest, sample } from './core/track.js';
-import { CAR_SPECS, createCar, stepCarFixed, kmh, driftTier } from './core/physics.js';
+import { CAR_SPECS, createCar, stepCarFixed, kmh } from './core/physics.js';
 import { RaceProgress, rankRacers, formatTime } from './core/progress.js';
 import { createAIProfile, aiInput } from './core/ai.js';
 import { createScene } from './game/scene.js';
@@ -11,12 +13,14 @@ import { buildTrackMeshes } from './game/trackMesh.js';
 import { createCarMesh } from './game/carModel.js';
 import { Effects } from './game/effects.js';
 import { Hud } from './game/hud.js';
+import { SteeringWheel } from './game/wheel.js';
 import { Net } from './net.js';
 
 const $ = (id) => document.getElementById(id);
 const PADS = buildPads(TRACK);
 const LAPS = 3;
 const COLORS = ['#37f3ff', '#ff2fb0', '#a06bff', '#39ff9e', '#ffd23d', '#ff6b3d'];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 const app = {
   mode: 'menu',          // menu | solo | multi
@@ -44,6 +48,7 @@ const app = {
   paused: false,
   finishAt: 0,
   resultsShown: false,
+  ranked: [],
 };
 
 /* ----------------------------- 3D 기반 ----------------------------- */
@@ -62,43 +67,59 @@ const camState = {
 };
 
 /* ----------------------------- 입력 ----------------------------- */
-const input = { steer: 0, throttle: 0, brake: 0, drift: false, boost: false, left: false, right: false };
+const input = { steer: 0, wheel: 0, throttle: 0, brake: 0, boost: false, left: false, right: false };
 const keys = new Set();
+
+const wheel = new SteeringWheel($('wheel'), { maxDeg: 135 });
+wheel.onChange = (v) => { input.wheel = v; };
 
 function bindHold(el, onDown, onUp) {
   if (!el) return;
   const down = (e) => {
     e.preventDefault();
+    el._pid = e.pointerId;
+    try { el.setPointerCapture(e.pointerId); } catch (err) { /* noop */ }
     el.classList.add('on');
     onDown();
   };
   const up = (e) => {
+    if (e && el._pid !== null && el._pid !== undefined && e.pointerId !== el._pid) return;
     if (e) e.preventDefault();
+    el._pid = null;
     el.classList.remove('on');
     onUp();
   };
   el.addEventListener('pointerdown', down);
   el.addEventListener('pointerup', up);
   el.addEventListener('pointercancel', up);
-  el.addEventListener('pointerleave', (e) => { if (e.buttons || e.pointerType === 'touch') up(e); });
+  el.addEventListener('pointerleave', (e) => { if (e.pointerType === 'touch' && !el._pid) up(e); });
   el.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
-bindHold($('btnLeft'), () => { input.left = true; }, () => { input.left = false; });
-bindHold($('btnRight'), () => { input.right = true; }, () => { input.right = false; });
-bindHold($('btnDrift'), () => { input.drift = true; }, () => { input.drift = false; });
 bindHold($('btnNitro'), () => { input.boost = true; }, () => { input.boost = false; });
 bindHold($('btnBrake'), () => { input.brake = 1; }, () => { input.brake = 0; });
 
-// 터치가 버튼 밖에서 끝나도 눌림 상태가 남지 않게
+// 터치가 버튼 밖에서 끝나도 눌림 상태가 남지 않게: 마지막 손가락이 떨어질 때만 전체 해제한다.
+// (한 손으로 핸들을 돌린 채 다른 손으로 NITRO를 누르는 두 손 조작을 끊지 않는다)
+const activePointers = new Set();
 function releaseAll() {
-  input.left = input.right = input.drift = input.boost = false;
+  input.left = input.right = false;
+  input.boost = false;
   input.brake = 0;
   document.querySelectorAll('.touchBtn.on').forEach((b) => b.classList.remove('on'));
+  wheel.release();
 }
-window.addEventListener('pointerup', releaseAll);
-window.addEventListener('pointercancel', releaseAll);
+window.addEventListener('pointerdown', (e) => activePointers.add(e.pointerId), true);
+window.addEventListener('pointerup', (e) => {
+  activePointers.delete(e.pointerId);
+  if (activePointers.size === 0) releaseAll();
+}, true);
+window.addEventListener('pointercancel', (e) => {
+  activePointers.delete(e.pointerId);
+  if (activePointers.size === 0) releaseAll();
+}, true);
 window.addEventListener('blur', releaseAll);
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
 
 window.addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
@@ -114,7 +135,9 @@ function readInput() {
   const right = input.right || keys.has('d') || keys.has('arrowright');
   const up = keys.has('w') || keys.has('arrowup');
   const down = keys.has('s') || keys.has('arrowdown');
-  input.steer = (right ? 1 : 0) - (left ? 1 : 0);
+  const keySteer = (right ? 1 : 0) - (left ? 1 : 0);
+  // 키보드가 눌리면 키보드 우선, 아니면 핸들 각도
+  input.steer = keySteer !== 0 ? keySteer : clamp(input.wheel, -1, 1);
   const braking = input.brake > 0 || down;
   input.throttle = braking ? 0 : (app.autoAccel ? 1 : (up ? 1 : 0));
   if (!app.autoAccel && !up) input.throttle = 0;
@@ -122,7 +145,6 @@ function readInput() {
     steer: input.steer,
     throttle: input.throttle,
     brake: braking ? 1 : 0,
-    drift: input.drift || keys.has(' '),
     boost: input.boost || keys.has('shift'),
   };
 }
@@ -155,7 +177,7 @@ function makeRacer(opts) {
     ai: opts.isAI ? createAIProfile(opts.seed || 1) : null,
     netBuffer: [],
     lastState: null,
-    skidAcc: 0,
+    sparkAcc: 0,
   };
   racer.car._hint = racer.hint;
   app.racers.push(racer);
@@ -183,6 +205,7 @@ function clearRacers() {
     });
   }
   app.racers = [];
+  app.ranked = [];
   effects.clear();
 }
 
@@ -191,7 +214,7 @@ function applyControlFlip(persist = true) {
   const on = app.flipControls;
   $('hud').classList.toggle('flip', on);
   if (persist) localStorage.setItem('neon_ctrl_flip', on ? '1' : '0');
-  const side = on ? '오른쪽 조향' : '왼쪽 조향';
+  const side = on ? '오른쪽 핸들' : '왼쪽 핸들';
   for (const id of ['handBtn', 'handBtnPause']) {
     const b = $(id);
     if (!b) continue;
@@ -203,8 +226,8 @@ function applyControlFlip(persist = true) {
   const foot = $('footHint');
   if (foot) {
     foot.innerHTML = on
-      ? '조작: 오른쪽 ◀ ▶ 조향 · 왼쪽 DRIFT·NITRO·BRAKE<br>PC: WASD/화살표 · Space 드리프트 · Shift 부스터'
-      : '조작: 왼쪽 ◀ ▶ 조향 · 오른쪽 DRIFT·NITRO·BRAKE<br>PC: WASD/화살표 · Space 드리프트 · Shift 부스터';
+      ? '조작: 오른쪽 핸들을 돌려 조향 · 왼쪽 NITRO·BRAKE<br>PC: WASD/화살표 조향 · Shift 부스터'
+      : '조작: 왼쪽 핸들을 돌려 조향 · 오른쪽 NITRO·BRAKE<br>PC: WASD/화살표 조향 · Shift 부스터';
   }
 }
 
@@ -212,7 +235,7 @@ function toggleControlFlip() {
   app.flipControls = !app.flipControls;
   releaseAll();
   applyControlFlip();
-  toast(app.flipControls ? '조작 반전 · 오른쪽 조향' : '조작 기본 · 왼쪽 조향', 1500);
+  toast(app.flipControls ? '조작 반전 · 오른쪽 핸들' : '조작 기본 · 왼쪽 핸들', 1500);
 }
 
 /* ----------------------------- 화면 전환 ----------------------------- */
@@ -252,16 +275,16 @@ function updateCamera(dt) {
   const car = me.car;
   const speed = Math.abs(car.speed);
   const boost = Math.min(1.4, (car.boostTime > 0 ? 1 : 0) + (car.nitroActive ? 1 : 0));
-  const yaw = car.h + (car.slip || 0) * 0.42;
+  const yaw = car.h;
   const cam = view.camera;
 
   if (camModeIsThird()) {
     const back = 8.7 + speed * 0.06 + boost * 2.0;
     const height = 3.8 + speed * 0.012 + boost * 0.3;
     const target = new THREE.Vector3(
-      car.x - Math.sin(yaw) * back - Math.cos(yaw) * (car.slip || 0) * 2.4,
+      car.x - Math.sin(yaw) * back,
       height,
-      car.z - Math.cos(yaw) * back + Math.sin(yaw) * (car.slip || 0) * 2.4
+      car.z - Math.cos(yaw) * back
     );
     const k = 1 - Math.exp(-dt * 7.5);
     camState.pos.lerp(target, k);
@@ -339,7 +362,7 @@ function beginCountdown() {
   const cd = $('countdown');
   cd.classList.remove('hidden');
   $('cdText').textContent = '3';
-  hud.setPos(1);
+  hud.setPos(1, app.racers.length);
   hud.setLap(1, LAPS);
   hud.setTime(0, null);
   camState.pos.set(0, 12, 0);
@@ -379,10 +402,10 @@ function updateRacers(dt) {
     let inp;
     if (r.isMe) {
       inp = readInput();
+      wheel.setVisual(inp.steer);
     } else {
       inp = aiInput(r.ai, r.car, q.s, app.simTime, TRACK);
     }
-    const before = { boost: r.car.boostTime, fuelBoost: r.car.nitroActive };
     const ev = stepCarFixed(r.car, inp, dt, { track: TRACK, pads: PADS, nearest: nearFn });
     const q2 = nearFn(r.car.x, r.car.z);
 
@@ -394,39 +417,9 @@ function updateRacers(dt) {
     }
 
     // ---- 이펙트
-    const tier = driftTier(r.car.gauge);
-    if (r.car.drifting && Math.abs(r.car.slip) > 0.06) {
-      r.skidAcc += dt;
-      while (r.skidAcc > 0.035) {
-        r.skidAcc -= 0.035;
-        const back = 1.15, side = 0.95;
-        const fx = Math.sin(r.car.h), fz = Math.cos(r.car.h);
-        const rx = Math.cos(r.car.h), rz = -Math.sin(r.car.h);
-        for (const sgn of [-1, 1]) {
-          effects.addSkid(
-            r.car.x - fx * back + rx * side * sgn,
-            r.car.z - fz * back + rz * side * sgn,
-            r.car.h, tier.key === 'none' ? 0x2f8cff : parseInt(tier.color.slice(1), 16),
-            Math.min(1, Math.abs(r.car.slip) * 2.2)
-          );
-        }
-      }
-      if (Math.random() < dt * 26) {
-        effects.spawnSpark(r.car.x - Math.sin(r.car.h) * 1.4, 0.18, r.car.z - Math.cos(r.car.h) * 1.4, 2,
-          parseInt((tier.key === 'none' ? '#4ea8ff' : tier.color).slice(1), 16), 7, 3);
-      }
-    }
     if (r.car.wallHit > 0.15) {
       effects.spawnSpark(r.car.x, 0.8, r.car.z, 4 + Math.round(r.car.wallHit * 8), 0xffb347, 8, 4);
-      if (r.isMe) {
-        camState.shake = Math.min(0.55, camState.shake + r.car.wallHit * 0.5);
-      }
-    }
-    if (ev.miniTurbo && r.isMe) {
-      effects.spawnRing(r.car.x, r.car.z, ev.miniTurbo === 'gold' ? 0xffd24a : ev.miniTurbo === 'purple' ? 0xb45cff : 0x39a7ff);
-      hud.flash(ev.miniTurbo === 'gold' ? 'rgba(255,220,110,.6)' : ev.miniTurbo === 'purple' ? 'rgba(190,120,255,.55)' : 'rgba(90,190,255,.5)');
-      hud.message(ev.miniTurbo === 'gold' ? '미니터보!' : ev.miniTurbo === 'purple' ? '미니터보' : '터보', 600);
-      camState.shake = Math.min(0.3, camState.shake + 0.12);
+      if (r.isMe) camState.shake = Math.min(0.55, camState.shake + r.car.wallHit * 0.5);
     }
     if (ev.pad >= 0) {
       effects.spawnRing(r.car.x, r.car.z, 0x7ef9ff);
@@ -434,12 +427,19 @@ function updateRacers(dt) {
       if (r.isMe) hud.message('부스터 패드!', 600);
     }
     if (r.car.padFlash > 0.5 && r.isMe) camState.shake = Math.min(0.25, camState.shake + 0.03);
+    if (r.car.nitroActive && r.isMe && Math.random() < dt * 30) {
+      effects.spawnSpark(r.car.x - Math.sin(r.car.h) * 1.6, 0.4, r.car.z - Math.cos(r.car.h) * 1.6, 1, 0x7ef9ff, 7, 3);
+    }
 
     r.mesh.update(r.car, dt, app.simTime, app.camMode);
   }
 
   // ---- 순위
-  const ranked = rankRacers(app.racers.map((r) => ({ ...r, progressValue: r.prog.progressValue, finished: r.prog.finished, finishTime: r.prog.finishTime })));
+  const list = app.racers.map((r) => ({
+    ref: r, id: r.id, progressValue: r.prog.progressValue,
+    finished: r.prog.finished, finishTime: r.prog.finishTime,
+  }));
+  const ranked = rankRacers(list);
   ranked.forEach((r, i) => { r.position = i + 1; });
   app.ranked = ranked;
 
@@ -451,23 +451,38 @@ function updateRacers(dt) {
       if (app.mode === 'solo') setTimeout(() => showResults(ranked), 1200);
     }
   }
-
 }
 
 let hudTick = 0;
+function boardRows() {
+  const ranked = app.ranked && app.ranked.length ? app.ranked : app.racers.map((r, i) => ({ ref: r, position: i + 1 }));
+  return ranked.map((r, i) => {
+    const racer = r.ref || r;
+    const prog = racer.prog;
+    const done = prog && prog.finished;
+    return {
+      rank: r.position || i + 1,
+      name: racer.name,
+      color: racer.color,
+      me: !!racer.isMe,
+      done,
+      lapText: done ? '완주' : `${Math.min(LAPS, prog.lap + 1)}/${LAPS}`,
+    };
+  });
+}
+
 function updateHud(dt) {
   const me = app.racers.find((r) => r.isMe);
   if (!me) return;
-  const ranked = app.ranked || [];
-  const pos = ranked.findIndex((r) => r.id === me.id) + 1;
-  hud.setPos(pos || 1);
+  const rows = boardRows();
+  const meRow = rows.find((r) => r.me);
+  hud.setPos(meRow ? meRow.rank : 1, app.racers.length);
   hud.setLap(me.prog.lapDisplay, LAPS);
   hud.setTime(me.prog.lapTime(raceElapsed()), me.prog.bestLap);
   hud.setSpeed(kmh(me.car));
-  const tier = driftTier(me.car.gauge);
-  hud.setDrift(me.car.gauge, tier.key === 'none' ? null : tier.color);
   hud.setNitro(me.car.boostFuel);
   hud.setBoostVisual(Math.min(1, (me.car.boostTime > 0 ? 0.8 : 0) + (me.car.nitroActive ? 1 : 0)));
+  hud.setBoard(rows);
   hudTick += dt;
   if (hudTick > 0.09) {
     hudTick = 0;
@@ -493,7 +508,7 @@ function updateRemote(r, dt) {
   const speed = a.speed + (b.speed - a.speed) * k;
   const fake = {
     x, z, h, speed, steer: 0, slip: 0,
-    drifting: a.drifting, boostTime: a.boost ? 0.4 : 0, nitroActive: false,
+    boostTime: a.boost ? 0.4 : 0, nitroActive: false,
   };
   r.car.x = x; r.car.z = z; r.car.h = h; r.car.speed = speed;
   r.mesh.update(fake, dt, app.simTime, app.camMode);
@@ -509,7 +524,6 @@ function sendPos() {
     z: Math.round(me.car.z * 100) / 100,
     h: Math.round(me.car.h * 1000) / 1000,
     speed: Math.round(me.car.speed * 100) / 100,
-    drifting: me.car.drifting,
     boost: me.car.boostTime > 0 || me.car.nitroActive,
     lap: me.prog.lap,
     cp: me.prog.nextCp,
@@ -553,17 +567,18 @@ function setupNetHandlers() {
     hud.message('GO!', 700);
   });
   net.on('state', (msg) => {
-    if (app.phase === 'countdown' && msg.t > 0) {
-      // 서버가 레이스를 시작했는데 클라이언트가 아직이면 동기화
-    }
     const now = performance.now();
     for (const ps of msg.players) {
       if (ps.id === net.id) continue;
       const r = app.racers.find((x) => x.id === ps.id);
       if (!r) continue;
-      r.netBuffer.push({ at: now, x: ps.x, z: ps.z, h: ps.h, speed: ps.speed, drifting: ps.drifting, boost: ps.boost });
+      r.netBuffer.push({ at: now, x: ps.x, z: ps.z, h: ps.h, speed: ps.speed, boost: ps.boost });
       if (r.netBuffer.length > 30) r.netBuffer.shift();
       r.prog.lap = ps.lap;
+      const q = nearest(TRACK, ps.x, ps.z, r.car._hint);
+      r.car._hint = q.index;
+      r.prog.s = q.s;
+      r.prog.sPrev = q.s;
     }
   });
   net.on('left', (msg) => {
@@ -655,6 +670,38 @@ function startMultiRace(room) {
 }
 
 /* ----------------------------- 결과 화면 ----------------------------- */
+function resultRows(list) {
+  return list.slice().sort((a, b) => {
+    const pa = a.prog, pb = b.prog;
+    if (pa.finished && pb.finished) return pa.finishTime - pb.finishTime;
+    if (pa.finished) return -1;
+    if (pb.finished) return 1;
+    return pb.progressValue - pa.progressValue;
+  });
+}
+
+function renderResultTable(rows) {
+  const table = $('resultTable');
+  table.innerHTML = '<tr><th>순위</th><th>드라이버</th><th>기록</th><th>베스트랩</th></tr>';
+  const medal = ['gold', 'silver', 'bronze'];
+  rows.forEach((r, i) => {
+    const tr = document.createElement('tr');
+    if (r.isMe) tr.className = 'me';
+    const prog = r.prog;
+    const time = prog.finished ? formatTime(prog.finishTime) : `${Math.min(LAPS, prog.lap + 1)}랩 진행`;
+    tr.innerHTML = `<td class="rk ${medal[i] || ''}">${i + 1}</td>
+      <td><span class="dots" style="color:${r.color};background:${r.color}"></span>${escapeHtml(r.name)}</td>
+      <td>${time}</td>
+      <td>${formatTime(prog.bestLap)}</td>`;
+    table.appendChild(tr);
+  });
+  const winner = rows[0];
+  const me = rows.find((r) => r.isMe);
+  $('resultSub').innerHTML = winner
+    ? `🏆 우승 <b>${escapeHtml(winner.name)}</b>${me && me !== winner ? ` · 내 순위 <b>${rows.indexOf(me) + 1}위</b>` : ''}`
+    : '';
+}
+
 function showResults(ranked) {
   if (app.resultsShown) return;
   app.resultsShown = true;
@@ -663,47 +710,40 @@ function showResults(ranked) {
   $('countdown').classList.add('hidden');
   show('results');
   $('resultTitle').textContent = '경기 결과';
-  const table = $('resultTable');
-  table.innerHTML = `<tr><th>순위</th><th>드라이버</th><th>기록</th><th>베스트랩</th></tr>`;
-  const list = ranked.slice().sort((a, b) => {
-    if (a.prog.finished && b.prog.finished) return a.prog.finishTime - b.prog.finishTime;
-    if (a.prog.finished) return -1;
-    if (b.prog.finished) return 1;
-    return b.prog.progressValue - a.prog.progressValue;
-  });
-  list.forEach((r, i) => {
-    const tr = document.createElement('tr');
-    if (r.isMe) tr.className = 'me';
-    const time = r.prog.finished ? formatTime(r.prog.finishTime) : `${Math.min(LAPS, r.prog.lap + 1)}랩 진행`;
-    tr.innerHTML = `<td class="rk ${i === 0 ? 'gold' : ''}">${i + 1}</td>
-      <td>${escapeHtml(r.name)}</td>
-      <td>${time}</td>
-      <td>${formatTime(r.prog.bestLap)}</td>`;
-    table.appendChild(tr);
-  });
+  const list = resultRows(ranked.map((r) => r.ref || app.racers.find((x) => x.id === r.id)).filter(Boolean));
+  renderResultTable(list);
 }
 
 function showMultiResults(order) {
   app.phase = 'finished';
   app.resultsShown = true;
   hud.hide();
+  $('countdown').classList.add('hidden');
   show('results');
   $('resultTitle').textContent = '경기 결과';
   const table = $('resultTable');
-  table.innerHTML = `<tr><th>순위</th><th>드라이버</th><th>기록</th><th>베스트랩</th></tr>`;
+  table.innerHTML = '<tr><th>순위</th><th>드라이버</th><th>기록</th><th>베스트랩</th></tr>';
+  const medal = ['gold', 'silver', 'bronze'];
   order.forEach((o, i) => {
     const tr = document.createElement('tr');
     if (o.id === app.net.id) tr.className = 'me';
-    tr.innerHTML = `<td class="rk ${i === 0 ? 'gold' : ''}">${i + 1}</td>
-      <td>${escapeHtml(o.name)}</td><td>${formatTime(o.time)}</td><td>${formatTime(o.best)}</td>`;
+    tr.innerHTML = `<td class="rk ${medal[i] || ''}">${i + 1}</td>
+      <td><span class="dots" style="color:${o.color};background:${o.color}"></span>${escapeHtml(o.name)}</td>
+      <td>${formatTime(o.time)}</td><td>${formatTime(o.best)}</td>`;
     table.appendChild(tr);
   });
+  const me = order.find((o) => o.id === app.net.id);
+  const winner = order[0];
+  $('resultSub').innerHTML = winner
+    ? `🏆 우승 <b>${escapeHtml(winner.name)}</b>${me && me !== winner ? ` · 내 순위 <b>${order.indexOf(me) + 1}위</b>` : ''}`
+    : '';
 }
 
 /* ----------------------------- 일시정지/재시작 ----------------------------- */
 function pauseRace() {
   if (app.phase !== 'racing') return;
   app.phase = 'paused';
+  releaseAll();
   show('pause');
 }
 function resumeRace() {
@@ -725,6 +765,7 @@ function backToMenu() {
   app.resultsShown = false;
   hud.hide();
   hide('countdown');
+  releaseAll();
   clearRacers();
   if (app.net) { try { app.net.send({ type: 'leave' }); } catch (e) { /* noop */ } }
   hideAllScreens();
@@ -736,9 +777,9 @@ function buildMenu() {
   const list = $('carList');
   list.innerHTML = '';
   const stats = {
-    coupe: { accel: 3.4, speed: 3.2, drift: 3.0 },
-    gt: { accel: 3.0, speed: 2.9, drift: 4.6 },
-    hyper: { accel: 4.0, speed: 4.6, drift: 2.4 },
+    coupe: { accel: 3.4, speed: 3.2, corner: 3.3 },
+    gt: { accel: 3.0, speed: 2.9, corner: 4.6 },
+    hyper: { accel: 4.0, speed: 4.6, corner: 2.8 },
   };
   for (const key of Object.keys(CAR_SPECS)) {
     const spec = CAR_SPECS[key];
@@ -750,7 +791,7 @@ function buildMenu() {
       <div class="stats">
         <i><b style="width:${(st.accel / 5) * 100}%"></b></i>
         <i><b style="width:${(st.speed / 5) * 100}%"></b></i>
-        <i><b style="width:${(st.drift / 5) * 100}%"></b></i>
+        <i><b style="width:${(st.corner / 5) * 100}%"></b></i>
       </div>`;
     card.addEventListener('click', () => {
       app.carKey = key;
@@ -939,8 +980,10 @@ function boot() {
   window.__neon = {
     app,
     TRACK,
+    wheel,
     state: () => {
       const me = app.racers.find((r) => r.isMe);
+      const rows = boardRows();
       return {
         phase: app.phase,
         mode: app.mode,
@@ -951,19 +994,24 @@ function boot() {
         lap: me ? me.prog.lap : 0,
         lapDisplay: me ? me.prog.lapDisplay : 0,
         nextCp: me ? me.prog.nextCp : 0,
-        drifting: me ? me.car.drifting : false,
-        driftGauge: me ? me.car.gauge : 0,
+        slip: me ? me.car.slip : 0,
         boostTime: me ? me.car.boostTime : 0,
         nitroFuel: me ? me.car.boostFuel : 0,
+        nitroActive: me ? me.car.nitroActive : false,
         x: me ? me.car.x : 0,
         z: me ? me.car.z : 0,
         h: me ? me.car.h : 0,
         steer: me ? me.car.steer : 0,
+        inputSteer: input.steer,
+        wheelAngle: wheel.angle,
+        wheelValue: wheel.value,
         camMode: app.camMode,
         flipControls: app.flipControls,
         input: { ...input },
         autoAccel: app.autoAccel,
-        position: me ? (rankRacers(app.racers).findIndex((r) => r.isMe) + 1) : 0,
+        position: rows.find((r) => r.me) ? rows.find((r) => r.me).rank : 0,
+        board: rows,
+        boardVisible: !document.getElementById('board').closest('.hidden') && !document.getElementById('hud').classList.contains('hidden'),
         racers: app.racers.length,
         finished: me ? me.prog.finished : false,
         resultsShown: app.resultsShown,

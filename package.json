@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "3D 네온 드리프트 레이싱 · 부스터·드리프트·친구랑 1:1 실시간 대결 (Node.js + Express + WebSocket + Three.js)",
+  "description": "3D 네온 레이싱 · 니트로 부스터 · 원형 핸들 조향 · 실시간 순위표 · 친구랑 1:1 실시간 대결 (Node.js + Express + WebSocket + Three.js)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -22,7 +22,7 @@
   "keywords": [
     "game",
     "racing",
-    "drift",
+    "kart",
     "three.js",
     "websocket",
     "multiplayer",

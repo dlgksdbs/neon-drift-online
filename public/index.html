@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
 <meta name="theme-color" content="#05030e">
-<title>NEON DRIFT · 3D 네온 드리프트 레이싱</title>
+<title>NEON DRIFT · 3D 네온 레이싱</title>
 <link rel="stylesheet" href="/css/app.css">
 <script type="importmap">
 { "imports": { "three": "/vendor/three.module.min.js" } }
@@ -17,11 +17,17 @@
   <!-- ================= HUD ================= -->
   <div id="hud" class="hidden">
     <div id="hud-top">
-      <div class="pill" id="posPill"><b id="posVal">1</b><span>/4</span></div>
+      <div class="pill" id="posPill"><b id="posVal">1</b><span id="posTotal">/4</span></div>
       <div class="pill" id="lapPill"><span>LAP</span><b id="lapVal">1/3</b></div>
       <div id="timeBox"><span id="lapTime">00:00.00</span><em id="bestLap">BEST --:--.--</em></div>
       <button id="btnCam" class="iconBtn" title="시점 전환">👁️<span id="camMode">3인칭</span></button>
       <button id="btnPause" class="iconBtn small" title="일시정지">⏸</button>
+    </div>
+
+    <!-- 실시간 순위표 -->
+    <div id="board">
+      <div class="bHead"><span>순위표</span><span id="boardLap">LAP 1/3</span></div>
+      <ol id="boardList"></ol>
     </div>
 
     <div id="minimapWrap"><canvas id="minimap" width="220" height="220"></canvas></div>
@@ -31,19 +37,43 @@
     <div id="gaugeWrap">
       <div id="speedBox"><b id="speedVal">0</b><span>km/h</span></div>
       <div class="bars">
-        <div class="bar drift"><i id="driftFill"></i><em id="driftLabel">DRIFT</em></div>
         <div class="bar nitro"><i id="nitroFill"></i><em>NITRO</em></div>
       </div>
     </div>
 
     <div id="controls">
       <div id="steerPad">
-        <button class="touchBtn steer" id="btnLeft" aria-label="좌회전">◀</button>
-        <button class="touchBtn steer" id="btnRight" aria-label="우회전">▶</button>
+        <div id="wheel" role="slider" aria-label="핸들" aria-valuemin="-1" aria-valuemax="1" aria-valuenow="0" tabindex="0">
+          <div class="wheelRot" id="wheelRot">
+            <svg viewBox="-50 -50 100 100" aria-hidden="true">
+              <defs>
+                <radialGradient id="hubGrad" cx="38%" cy="30%" r="70%">
+                  <stop offset="0%" stop-color="#7ff6ff"/>
+                  <stop offset="55%" stop-color="#2a4a86"/>
+                  <stop offset="100%" stop-color="#0a1130"/>
+                </radialGradient>
+                <linearGradient id="rimGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#8ff8ff"/>
+                  <stop offset="55%" stop-color="#2f8fd8"/>
+                  <stop offset="100%" stop-color="#1a2a5e"/>
+                </linearGradient>
+              </defs>
+              <circle class="wRim" cx="0" cy="0" r="44" />
+              <circle class="wGrip" cx="0" cy="0" r="44" />
+              <g class="wSpokes">
+                <line x1="-40" y1="7" x2="-9" y2="3" />
+                <line x1="40" y1="7" x2="9" y2="3" />
+                <line x1="0" y1="40" x2="0" y2="9" />
+              </g>
+              <circle class="wHub" cx="0" cy="0" r="12" />
+              <circle class="wHubDot" cx="0" cy="0" r="3.4" />
+              <path class="wMark" d="M0 -47 L-5 -37 L5 -37 Z" />
+            </svg>
+          </div>
+        </div>
       </div>
       <div id="actionPad">
         <button class="touchBtn brake" id="btnBrake">BRAKE</button>
-        <button class="touchBtn drift" id="btnDrift">DRIFT</button>
         <button class="touchBtn nitro" id="btnNitro">NITRO</button>
       </div>
     </div>
@@ -56,7 +86,7 @@
     <div class="menuScroll">
       <header class="logo">
         <h1>NEON<span>DRIFT</span></h1>
-        <p class="tagline">3D 네온 드리프트 레이싱 · 부스터 · 친구 대결</p>
+        <p class="tagline">3D 네온 레이싱 · 니트로 부스터 · 친구 대결</p>
       </header>
 
       <section class="card">
@@ -80,13 +110,13 @@
       </section>
 
       <section class="card">
-        <div class="rowLabel">조작 배치 <span>조향 버튼이 있는 쪽</span></div>
-        <button class="optToggle wide" id="handBtn" aria-pressed="false"><span>⇄ 조작 좌우 반전</span><b>왼쪽 조향</b></button>
+        <div class="rowLabel">조작 배치 <span>핸들이 있는 쪽</span></div>
+        <button class="optToggle wide" id="handBtn" aria-pressed="false"><span>⇄ 조작 좌우 반전</span><b>왼쪽 핸들</b></button>
       </section>
 
       <button class="bigBtn" id="btnSolo">혼자 달리기 <em>AI 3명과 대결</em></button>
       <button class="bigBtn ghost" id="btnMulti">친구랑 대결 <em>방 코드로 1:1 · 다인전</em></button>
-      <p class="foot" id="footHint">조작: 왼쪽 ◀ ▶ 조향 · 오른쪽 DRIFT·NITRO·BRAKE<br>PC: WASD/화살표 · Space 드리프트 · Shift 부스터</p>
+      <p class="foot" id="footHint">조작: 왼쪽 핸들을 돌려 조향 · 오른쪽 NITRO·BRAKE<br>PC: WASD/화살표 조향 · Shift 부스터</p>
     </div>
   </div>
 
@@ -123,6 +153,7 @@
   <div id="results" class="screen hidden">
     <div class="menuScroll">
       <h2 class="panelTitle" id="resultTitle">경기 결과</h2>
+      <p class="resultSub" id="resultSub"></p>
       <div class="card">
         <table id="resultTable"></table>
       </div>
@@ -135,8 +166,8 @@
     <div class="menuScroll">
       <h2 class="panelTitle">일시정지</h2>
       <section class="card">
-        <div class="rowLabel">조작 배치 <span>조향 버튼이 있는 쪽</span></div>
-        <button class="optToggle wide" id="handBtnPause" aria-pressed="false"><span>⇄ 조작 좌우 반전</span><b>왼쪽 조향</b></button>
+        <div class="rowLabel">조작 배치 <span>핸들이 있는 쪽</span></div>
+        <button class="optToggle wide" id="handBtnPause" aria-pressed="false"><span>⇄ 조작 좌우 반전</span><b>왼쪽 핸들</b></button>
       </section>
       <button class="bigBtn" id="btnResume">계속하기</button>
       <button class="bigBtn ghost" id="btnRestart">다시 시작</button>

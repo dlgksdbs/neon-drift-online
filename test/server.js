@@ -142,12 +142,12 @@ section('WebSocket · 실시간 위치 동기화');
 const posAt = (s) => { const p = sample(TRACK, s, 0); return { x: p.x, z: p.z, h: p.heading }; };
 {
   const p0 = posAt(TRACK.total - 20);
-  A.send({ type: 'pos', ...p0, speed: 20, drifting: false, boost: false });
-  B.send({ type: 'pos', ...p0, speed: 18, drifting: true, boost: false });
+  A.send({ type: 'pos', ...p0, speed: 20, boost: false });
+  B.send({ type: 'pos', ...p0, speed: 18, boost: true });
   const st = await A.waitFor('state', 3000);
   ok('state 브로드캐스트에 2명', st.players.length === 2, st.players.length);
   const bp = st.players.find((p) => p.id === B.id);
-  ok('B 위치/드리프트 상태 전달', bp && bp.drifting === true && Math.abs(bp.x - p0.x) < 1, bp);
+  ok('B 위치/부스트 상태 전달', bp && bp.boost === true && Math.abs(bp.x - p0.x) < 1, bp);
   ok('state에 경과 시간 t', typeof st.t === 'number');
 
   // 순간이동(치트) 무시
@@ -171,7 +171,7 @@ section('WebSocket · 체크포인트 검증 · 완주 결과');
       for (let i = 0; i < TRACK.total / step + 1; i++) {
         s += step;
         const p = posAt(s);
-        client.send({ type: 'pos', ...p, speed: 30, drifting: false, boost: false });
+        client.send({ type: 'pos', ...p, speed: 30, boost: false });
         await sleep(2);
       }
     }

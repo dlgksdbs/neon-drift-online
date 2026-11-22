@@ -227,7 +227,7 @@ export function createCarMesh(specKey, neonColor = '#37f3ff', opts = {}) {
       w.spin.rotation.x -= speed * dt * 2.6;
       if (w.front) w.group.rotation.y = (car.steer || 0) * 0.4;
     }
-    const targetRoll = -(car.steer || 0) * 0.045 + (car.drifting ? Math.max(-0.12, Math.min(0.12, (car.slip || 0) * 0.32)) : 0);
+    const targetRoll = -(car.steer || 0) * 0.05;
     g.rotation.z = THREE.MathUtils.lerp(g.rotation.z, targetRoll, Math.min(1, dt * 8));
     g.position.y = THREE.MathUtils.lerp(g.position.y, 0, Math.min(1, dt * 4));
 

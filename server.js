@@ -200,7 +200,7 @@ function tickRoom(room) {
     players.push({
       id: p.id, name: p.name, car: p.car, color: p.color,
       x: round2(p.x), z: round2(p.z), h: round3(p.h), speed: round2(p.speed || 0),
-      drifting: !!p.drifting, boost: !!p.boost, lap: p.prog ? p.prog.lap : 0,
+      boost: !!p.boost, lap: p.prog ? p.prog.lap : 0,
       cp: p.prog ? p.prog.nextCp : 0, finished: !!p.finished,
     });
   }
@@ -316,7 +316,6 @@ wss.on('connection', (ws) => {
         p.x = x; p.z = z;
         p.h = Number(msg.h) || 0;
         p.speed = Number(msg.speed) || 0;
-        p.drifting = !!msg.drifting;
         p.boost = !!msg.boost;
         const near = nearest(TRACK, x, z, p.hint);
         p.hint = near.index;

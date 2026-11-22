@@ -7,7 +7,7 @@
   --bg: #05030e;
   --panel: rgba(12, 14, 32, 0.82);
   --ctl: clamp(58px, min(9.4vh, 19vw), 86px);
-  --ctl-steer: calc(var(--ctl) * 1.2);
+  --wheel: clamp(104px, 31vw, 138px);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
 }
@@ -63,6 +63,44 @@ html, body {
 .iconBtn.small { min-width: 40px; width: 40px; padding: 0; font-size: 15px; border-color: rgba(120,150,240,.4); box-shadow: none; }
 .iconBtn:active { transform: scale(.95); }
 
+/* ---------------- 실시간 순위표 ---------------- */
+#board {
+  position: absolute; left: 8px; top: calc(var(--safe-t) + 56px);
+  width: clamp(138px, 37vw, 156px);
+  padding: 5px 6px 6px; border-radius: 12px;
+  background: rgba(6, 10, 26, 0.6); border: 1px solid rgba(34, 230, 255, .2);
+  box-shadow: 0 0 16px rgba(34, 230, 255, .1), inset 0 0 14px rgba(40, 120, 220, .1);
+  backdrop-filter: blur(6px);
+}
+#board .bHead {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 8.5px; letter-spacing: .8px; color: #6ea9d8; margin: 0 2px 3px;
+}
+#board .bHead span:first-child { color: #9fd8ff; font-weight: 700; }
+#boardLap { color: #ffd88a; font-variant-numeric: tabular-nums; }
+#boardList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+#boardList li {
+  display: flex; align-items: center; gap: 4px; height: 18px; padding: 0 3px;
+  border-radius: 5px; color: #cfe6ff; transition: background .15s, color .15s;
+}
+#boardList li.me {
+  background: rgba(34, 230, 255, .18); color: #fff;
+  box-shadow: inset 0 0 8px rgba(34, 230, 255, .28), 0 0 8px rgba(34, 230, 255, .15);
+}
+#boardList .rk {
+  width: 12px; flex: none; text-align: center; font-weight: 900; font-size: 10px;
+  color: #8fb6e0; font-variant-numeric: tabular-nums;
+}
+#boardList li.p1 .rk { color: var(--gold); text-shadow: 0 0 8px rgba(255, 194, 61, .75); }
+#boardList .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; box-shadow: 0 0 6px currentColor; }
+#boardList .nm {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10px; font-weight: 700; letter-spacing: -.1px;
+}
+#boardList .lp { flex: none; font-size: 8.5px; color: #7fb4e0; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+#boardList li.me .lp { color: #b8f3ff; }
+#boardList li.done .lp { color: var(--green); }
+
 #minimapWrap {
   position: absolute; right: 10px; top: calc(var(--safe-t) + 60px);
   width: 92px; height: 92px; border-radius: 14px;
@@ -101,7 +139,6 @@ html, body {
   position: absolute; inset: 0; width: 0%; border-radius: 6px;
   transition: width .06s linear;
 }
-.bar.drift i { background: linear-gradient(90deg, #2f7dff, #7a4bff 55%, #ffd24a); box-shadow: 0 0 10px rgba(122, 75, 255, .8); }
 .bar.nitro i { background: linear-gradient(90deg, #00d5ff, #7cf7ff); box-shadow: 0 0 10px rgba(0, 213, 255, .8); }
 .bar em {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
@@ -109,16 +146,40 @@ html, body {
   text-shadow: 0 0 6px rgba(0, 0, 0, .9); font-weight: 700;
 }
 
-/* ---------------- 조작 버튼 ---------------- */
+/* ---------------- 조작: 원형 핸들 + 액션 ---------------- */
 #controls {
   position: absolute; left: 0; right: 0; bottom: 0;
-  height: calc(var(--safe-b) + 142px);
+  height: calc(var(--safe-b) + 148px);
   display: flex; align-items: flex-end; justify-content: space-between;
   padding: 0 10px calc(var(--safe-b) + 6px);
   pointer-events: none;
 }
-#steerPad { display: flex; gap: 8px; pointer-events: auto; }
-#actionPad { position: relative; width: clamp(136px, 44vw, 172px); height: calc(var(--ctl) * 1.62); pointer-events: auto; }
+#steerPad { display: flex; align-items: flex-end; pointer-events: auto; }
+
+#wheel {
+  position: relative; width: var(--wheel); height: var(--wheel); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  touch-action: none; cursor: grab;
+  background: radial-gradient(circle at 36% 28%, rgba(34, 70, 130, .6), rgba(6, 10, 24, .78) 72%);
+  border: 1.5px solid rgba(90, 200, 255, .38);
+  box-shadow: 0 0 20px rgba(30, 160, 255, .28), inset 0 0 22px rgba(40, 120, 220, .16);
+  backdrop-filter: blur(4px);
+}
+#wheel.on { cursor: grabbing; border-color: rgba(120, 240, 255, .85); box-shadow: 0 0 30px rgba(60, 220, 255, .6), inset 0 0 24px rgba(80, 200, 255, .3); }
+#wheel .wheelRot {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  transform: rotate(0deg); will-change: transform;
+}
+#wheel .wheelRot.anim { transition: transform .26s cubic-bezier(.22, .9, .3, 1.05); }
+#wheel svg { width: 100%; height: 100%; display: block; overflow: visible; filter: drop-shadow(0 0 6px rgba(60, 210, 255, .5)); }
+#wheel .wRim { fill: none; stroke: url(#rimGrad); stroke-width: 7; }
+#wheel .wGrip { fill: none; stroke: rgba(160, 240, 255, .5); stroke-width: 2; stroke-dasharray: 2.5 6.5; }
+#wheel .wSpokes line { stroke: rgba(155, 230, 255, .9); stroke-width: 6.5; stroke-linecap: round; }
+#wheel .wHub { fill: url(#hubGrad); stroke: rgba(190, 250, 255, .75); stroke-width: 2; }
+#wheel .wHubDot { fill: #e6feff; }
+#wheel .wMark { fill: var(--magenta); }
+
+#actionPad { position: relative; width: clamp(118px, 40vw, 158px); height: calc(var(--ctl) * 1.62); pointer-events: auto; }
 .touchBtn {
   border: none; font-family: inherit; font-weight: 900; color: #eaf7ff;
   background: radial-gradient(circle at 35% 30%, rgba(45, 70, 130, .55), rgba(10, 14, 32, .72));
@@ -132,29 +193,16 @@ html, body {
   background: radial-gradient(circle at 35% 30%, rgba(80, 210, 255, .75), rgba(20, 60, 130, .85));
   box-shadow: 0 0 26px rgba(60, 220, 255, .65), inset 0 0 22px rgba(120, 230, 255, .45);
 }
-.touchBtn.steer {
-  width: var(--ctl-steer); height: var(--ctl-steer); border-radius: 50%;
-  font-size: calc(var(--ctl-steer) * 0.4); line-height: 1;
-  display: flex; align-items: center; justify-content: center;
-}
-#btnDrift {
-  position: absolute; right: 0; bottom: 0;
-  width: calc(var(--ctl) * 1.1); height: calc(var(--ctl) * 1.1); border-radius: 50%;
-  font-size: 13px; letter-spacing: 1px;
-  border-color: rgba(180, 120, 255, .6);
-  box-shadow: 0 0 18px rgba(140, 80, 255, .3), inset 0 0 18px rgba(140, 80, 255, .2);
-}
-#btnDrift.on { background: radial-gradient(circle at 35% 30%, rgba(200, 130, 255, .9), rgba(80, 30, 160, .9)); box-shadow: 0 0 30px rgba(190, 110, 255, .8); }
 #btnNitro {
-  position: absolute; left: 0; bottom: 4px;
-  width: calc(var(--ctl) * 0.9); height: calc(var(--ctl) * 0.9); border-radius: 50%;
-  font-size: 11px; letter-spacing: .6px;
+  position: absolute; right: 0; bottom: 0;
+  width: calc(var(--ctl) * 1.12); height: calc(var(--ctl) * 1.12); border-radius: 50%;
+  font-size: 12px; letter-spacing: .8px;
   border-color: rgba(90, 250, 230, .55);
 }
 #btnNitro.on { background: radial-gradient(circle at 35% 30%, rgba(120, 255, 235, .85), rgba(10, 90, 120, .9)); box-shadow: 0 0 30px rgba(90, 250, 230, .8); }
 #btnBrake {
   position: absolute; left: 2px; top: 0;
-  width: calc(var(--ctl) * 0.72); height: calc(var(--ctl) * 0.6); border-radius: 16px;
+  width: calc(var(--ctl) * 0.78); height: calc(var(--ctl) * 0.6); border-radius: 16px;
   font-size: 10px; letter-spacing: .6px; color: #ffd9e6;
   border-color: rgba(255, 90, 150, .45);
   box-shadow: 0 0 14px rgba(255, 60, 130, .22);
@@ -162,11 +210,10 @@ html, body {
 #btnBrake.on { background: radial-gradient(circle at 35% 30%, rgba(255, 120, 170, .8), rgba(130, 15, 60, .9)); box-shadow: 0 0 24px rgba(255, 60, 130, .7); }
 
 /* ---------------- 조작 좌우 반전 (#hud.flip) ----------------
-   기본: 왼쪽 조향 피드 / 오른쪽 액션 피드
-   반전: 좌우를 거울처럼 뒤집는다(◀ 는 ▶ 의 왼쪽 순서 유지, 여백·터치 영역 동일) */
+   기본: 왼쪽 핸들 / 오른쪽 액션 피드
+   반전: 좌우를 거울처럼 뒤집는다(터치 영역 동일, 여백만 거울 대칭) */
 #hud.flip #controls { flex-direction: row-reverse; }
-#hud.flip #btnDrift { right: auto; left: 0; }
-#hud.flip #btnNitro { left: auto; right: 0; }
+#hud.flip #btnNitro { right: auto; left: 0; }
 #hud.flip #btnBrake { left: auto; right: 2px; }
 
 /* ---------------- 이펙트 오버레이 ---------------- */
@@ -292,13 +339,18 @@ input::placeholder { color: #5c7599; }
 .foot { text-align: center; font-size: 10.5px; line-height: 1.6; color: #6d86a8; margin: 4px 0 0; }
 
 .panelTitle { margin: 4px 0 2px; font-size: 22px; font-weight: 900; letter-spacing: 1px; text-align: center; color: #eaf7ff; text-shadow: 0 0 16px rgba(34, 230, 255, .6); }
+.resultSub { margin: 0 0 4px; text-align: center; font-size: 12px; color: #9fd8ff; }
+.resultSub b { color: #ffd88a; }
 
 #resultTable { width: 100%; border-collapse: collapse; font-size: 13px; }
-#resultTable th { font-size: 10px; color: #7fa6cb; font-weight: 600; padding: 4px 6px; text-align: left; letter-spacing: .5px; }
+#resultTable th { font-size: 10px; color: #7fa6cb; font-weight: 600; padding: 4px 6px; text-align: left; letter-spacing: .5px; white-space: nowrap; }
 #resultTable td { padding: 8px 6px; border-top: 1px solid rgba(80, 120, 200, .16); }
 #resultTable tr.me td { color: #7ef9ff; font-weight: 800; }
-#resultTable .rk { font-weight: 900; width: 26px; }
+#resultTable .rk { font-weight: 900; width: 34px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 #resultTable .rk.gold { color: var(--gold); text-shadow: 0 0 10px rgba(255, 194, 61, .8); }
+#resultTable .rk.silver { color: #d7e6f5; }
+#resultTable .rk.bronze { color: #e6a468; }
+#resultTable .dots { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; box-shadow: 0 0 6px currentColor; }
 
 #countdown {
   position: absolute; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center;
@@ -330,13 +382,18 @@ input::placeholder { color: #5c7599; }
 
 /* 가로 모드 */
 @media (orientation: landscape) and (max-height: 560px) {
-  :root { --ctl: clamp(52px, 13vh, 66px); }
-  #gaugeWrap { bottom: calc(var(--safe-b) + 122px); }
-  #controls { height: calc(var(--safe-b) + 112px); }
+  :root {
+    --ctl: clamp(52px, 13vh, 66px);
+    --wheel: clamp(92px, 26vh, 112px);
+  }
+  #gaugeWrap { bottom: calc(var(--safe-b) + 118px); }
+  #controls { height: calc(var(--safe-b) + 118px); }
   #speedVal { font-size: 30px; }
-  #controls { height: calc(var(--safe-b) + 112px); }
-  #actionPad { width: 152px; height: calc(var(--ctl) * 1.6); }
+  #actionPad { width: 148px; height: calc(var(--ctl) * 1.6); }
   #minimapWrap { width: 72px; height: 72px; top: calc(var(--safe-t) + 54px); }
+  #board { width: 152px; top: calc(var(--safe-t) + 56px); padding: 4px 5px 5px; }
+  #boardList li { height: 16px; }
+  #boardList .nm { font-size: 9.5px; }
   .logo h1 { font-size: 30px; }
   .screen { padding-top: calc(var(--safe-t) + 8px); }
   .menuScroll { max-width: 560px; }
