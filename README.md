@@ -1,0 +1,73 @@
+# 🏎️ NEON DRIFT · 3D 네온 드리프트 레이싱
+
+모바일 웹(안드로이드 세로 390×844 기준, 가로 지원)에서 부드럽게 도는 **3D 네온 드리프트 레이싱** 게임.
+혼자서 AI 3명과 달리거나, **방 코드로 친구와 1:1·다인전** 실시간 대결을 할 수 있다.
+
+- Node.js + Express + `ws`(WebSocket) + `three@0.169.0` (외부 CDN 의존 0, `public/vendor` 로컬 번들)
+- 폰 트랙 `public/js/core/*` 는 순수 JS 모듈이라 **서버 검증과 클라이언트가 같은 물리/체크포인트 로직**을 쓴다.
+
+## 실행
+
+```bash
+npm install
+npm start            # PORT=3000
+PORT=8080 npm start  # 포트 지정
+```
+
+- 게임: `http://localhost:3000/`
+- 헬스체크: `GET /healthz` → `{"ok":true,"name":"neon-drift-online", ...}`
+- 방 정보: `GET /api/info`
+- 친구 초대: `/?room=ABCD` (방 코드 자동 참가), `&name=닉네임` 으로 이름 지정
+
+## 조작
+
+| 동작 | 모바일 | PC |
+|---|---|---|
+| 조향 | 왼쪽 하단 ◀ ▶ (큰 터치 버튼) | A/D, ←/→ |
+| 가속 | 자동 가속(기본 ON) | W/↑ (자동 가속 끄면 수동) |
+| 브레이크 | BRAKE | S/↓ |
+| 드리프트 | DRIFT | Space |
+| 부스터(니트로) | NITRO | Shift |
+| 시점 전환 | 오른쪽 위 👁️ | C |
+| 일시정지 | ⏸ | Esc |
+
+**드리프트 → 미니터보**: DRIFT 를 누른 채 코너를 돌면 게이지가 차고, 떼는 순간 단계에 따라 터보가 터진다.
+파랑(30) → 보라(60) → 금색(90). 바닥의 화살표 **부스터 패드**를 밟으면 즉시 가속한다.
+
+## 게임 구성
+
+- **트랙**: 네온 하버 서킷(1,169m 폐곡선, 폭 18m, 체크포인트 8개, 3랩). 직선·완만한 커브·드리프트 코너(최소 반경 27m) 혼합.
+- **차량 3종**: 네온 쿠페(밸런스) · 드리프트 GT(미끄러짐↑ 게이지↑) · 하이퍼카(최고속↑ 그립↑) + 네온 컬러 6색.
+- **시점**: 다이나믹 3인칭(속도·부스터에 따라 FOV/거리 변화) ↔ 1인칭 후드.
+- **효과**: 네온 스키드마크, 스파크, 배기 불꽃, 스피드 라인, 미니터보 충격파, 월드 네온 스카이라인/가로등/체크포인트 아치.
+- **모드**: 혼자 달리기(AI 3명, 닉네임 비우면 '드라이버') / 친구랑 대결(방 코드, 대기실, 3-2-1-GO, 실시간 위치·회전·드리프트·부스터 동기화, 실시간 순위·완주 결과).
+
+## 구조
+
+```
+server.js                    Express + WebSocket 방/레이스 서버 (진행도 서버 검증)
+public/index.html, css/      UI (메뉴·로비·HUD·결과)
+public/js/core/              순수 로직 (서버·클라이언트 공용)
+  track.js                   트랙 스플라인·체크포인트·부스터 패드
+  physics.js                 아케이드 드리프트 물리·게이지·미니터보·니트로·충돌
+  progress.js                순서 기반 체크포인트·랩·순위
+  ai.js                      AI 레이싱 라인·코너 속도 계획
+public/js/game/              3D (scene/trackMesh/carModel/effects/hud)
+public/js/net.js             WebSocket 클라이언트
+public/js/main.js            게임 루프·모드·카메라·입력
+test/unit.js                 물리·체크포인트·AI 단위 테스트
+test/server.js               HTTP·WebSocket 방/동기화/완주 테스트
+test/mobile.js               390×844 실제 렌더 테스트(조작·시점·UI 겹침·멀티 2클라이언트)
+```
+
+## 테스트
+
+```bash
+npm test           # unit + server  (총 102개 체크)
+npm run test:mobile  # 모바일 실렌더 (스크린샷 → downloads/neon-drift-shots)
+```
+
+## 배포 메모
+
+- `PORT` 환경변수를 그대로 사용한다. `Dockerfile` 포함(Railway 등 컨테이너 배포용).
+- WebSocket 은 같은 서버의 `/ws` 경로. 리버스 프록시 사용 시 업그레이드 헤더 필요.

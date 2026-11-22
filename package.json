@@ -1,0 +1,32 @@
+{
+  "name": "neon-drift-online",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "3D 네온 드리프트 레이싱 · 부스터·드리프트·친구랑 1:1 실시간 대결 (Node.js + Express + WebSocket + Three.js)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node test/unit.js && node test/server.js",
+    "test:mobile": "node test/mobile.js",
+    "test:all": "node test/unit.js && node test/server.js && node test/mobile.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  },
+  "keywords": [
+    "game",
+    "racing",
+    "drift",
+    "three.js",
+    "websocket",
+    "multiplayer",
+    "mobile"
+  ],
+  "license": "MIT"
+}
