@@ -79,9 +79,14 @@
         <button class="optToggle" id="qualityBtn"><span>그래픽</span><b>높음</b></button>
       </section>
 
+      <section class="card">
+        <div class="rowLabel">조작 배치 <span>조향 버튼이 있는 쪽</span></div>
+        <button class="optToggle wide" id="handBtn" aria-pressed="false"><span>⇄ 조작 좌우 반전</span><b>왼쪽 조향</b></button>
+      </section>
+
       <button class="bigBtn" id="btnSolo">혼자 달리기 <em>AI 3명과 대결</em></button>
       <button class="bigBtn ghost" id="btnMulti">친구랑 대결 <em>방 코드로 1:1 · 다인전</em></button>
-      <p class="foot">조작: 왼쪽 ◀ ▶ 조향 · DRIFT 드리프트 · NITRO 부스터<br>PC: WASD/화살표 · Space 드리프트 · Shift 부스터</p>
+      <p class="foot" id="footHint">조작: 왼쪽 ◀ ▶ 조향 · 오른쪽 DRIFT·NITRO·BRAKE<br>PC: WASD/화살표 · Space 드리프트 · Shift 부스터</p>
     </div>
   </div>
 
@@ -129,6 +134,10 @@
   <div id="pause" class="screen hidden">
     <div class="menuScroll">
       <h2 class="panelTitle">일시정지</h2>
+      <section class="card">
+        <div class="rowLabel">조작 배치 <span>조향 버튼이 있는 쪽</span></div>
+        <button class="optToggle wide" id="handBtnPause" aria-pressed="false"><span>⇄ 조작 좌우 반전</span><b>왼쪽 조향</b></button>
+      </section>
       <button class="bigBtn" id="btnResume">계속하기</button>
       <button class="bigBtn ghost" id="btnRestart">다시 시작</button>
       <button class="bigBtn ghost" id="btnQuit">메인으로</button>

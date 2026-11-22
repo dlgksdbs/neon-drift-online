@@ -24,6 +24,7 @@ const app = {
   camMode: 'third',
   autoAccel: true,
   quality: 'high',
+  flipControls: localStorage.getItem('neon_ctrl_flip') === '1',
   nick: localStorage.getItem('neon_nick') || '',
   carKey: localStorage.getItem('neon_car') || 'coupe',
   color: localStorage.getItem('neon_color') || COLORS[0],
@@ -183,6 +184,35 @@ function clearRacers() {
   }
   app.racers = [];
   effects.clear();
+}
+
+/* ----------------------------- 조작 좌우 반전 ----------------------------- */
+function applyControlFlip(persist = true) {
+  const on = app.flipControls;
+  $('hud').classList.toggle('flip', on);
+  if (persist) localStorage.setItem('neon_ctrl_flip', on ? '1' : '0');
+  const side = on ? '오른쪽 조향' : '왼쪽 조향';
+  for (const id of ['handBtn', 'handBtnPause']) {
+    const b = $(id);
+    if (!b) continue;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    const v = b.querySelector('b');
+    if (v) v.textContent = side;
+  }
+  const foot = $('footHint');
+  if (foot) {
+    foot.innerHTML = on
+      ? '조작: 오른쪽 ◀ ▶ 조향 · 왼쪽 DRIFT·NITRO·BRAKE<br>PC: WASD/화살표 · Space 드리프트 · Shift 부스터'
+      : '조작: 왼쪽 ◀ ▶ 조향 · 오른쪽 DRIFT·NITRO·BRAKE<br>PC: WASD/화살표 · Space 드리프트 · Shift 부스터';
+  }
+}
+
+function toggleControlFlip() {
+  app.flipControls = !app.flipControls;
+  releaseAll();
+  applyControlFlip();
+  toast(app.flipControls ? '조작 반전 · 오른쪽 조향' : '조작 기본 · 왼쪽 조향', 1500);
 }
 
 /* ----------------------------- 화면 전환 ----------------------------- */
@@ -764,6 +794,9 @@ function buildMenu() {
   });
 
   $('btnSolo').addEventListener('click', () => startSolo());
+  $('handBtn').addEventListener('click', () => toggleControlFlip());
+  $('handBtnPause').addEventListener('click', () => toggleControlFlip());
+  applyControlFlip(false);
   $('btnMulti').addEventListener('click', () => enterMulti());
   $('btnCreate').addEventListener('click', () => createRoom());
   $('btnJoin').addEventListener('click', () => joinRoom());
@@ -927,6 +960,7 @@ function boot() {
         h: me ? me.car.h : 0,
         steer: me ? me.car.steer : 0,
         camMode: app.camMode,
+        flipControls: app.flipControls,
         input: { ...input },
         autoAccel: app.autoAccel,
         position: me ? (rankRacers(app.racers).findIndex((r) => r.isMe) + 1) : 0,
@@ -960,6 +994,8 @@ function boot() {
       return { mean, std: Math.sqrt(Math.max(0, sum2 / n - mean * mean)), maxV, colors: colors.size, w, h };
     },
     toggleCamera,
+    toggleControlFlip,
+    applyControlFlip,
     startSolo,
     errors: app.errors,
     renderer: view.renderer,

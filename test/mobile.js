@@ -76,6 +76,32 @@ async function canvasStats(page) {
   return page.evaluate(() => window.__neon.readPixels());
 }
 
+/* 조작 버튼 배치 측정(좌우 반전 검증용) */
+async function controlLayout(p) {
+  return p.evaluate(() => {
+    const ids = ['controls', 'steerPad', 'actionPad', 'btnLeft', 'btnRight', 'btnDrift', 'btnNitro', 'btnBrake'];
+    const r = {};
+    for (const id of ids) {
+      const b = document.getElementById(id).getBoundingClientRect();
+      r[id] = { x: b.x, y: b.y, w: b.width, h: b.height, right: b.right, bottom: b.bottom };
+    }
+    const keys = ['btnLeft', 'btnRight', 'btnDrift', 'btnNitro', 'btnBrake'];
+    const overlaps = [];
+    for (let i = 0; i < keys.length; i++) {
+      for (let j = i + 1; j < keys.length; j++) {
+        const a = r[keys[i]], b = r[keys[j]];
+        if (!(a.right <= b.x || b.right <= a.x || a.bottom <= b.y || b.bottom <= a.y)) overlaps.push([keys[i], keys[j]]);
+      }
+    }
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const outside = Object.entries(r).filter(([, v]) => v.x < -1 || v.y < -1 || v.right > vw + 1 || v.bottom > vh + 1).map(([k]) => k);
+    return { r, overlaps, outside, vw, vh, flipped: document.getElementById('hud').classList.contains('flip') };
+  });
+}
+/* 거울 대칭 확인: A 가 화면 왼쪽에서 떨어진 거리 = B 가 오른쪽에서 떨어진 거리 */
+const isMirrored = (a, b, vw) => Math.abs(a.x - (vw - b.right)) < 2 && Math.abs(a.y - b.y) < 2;
+const fmtRect = (r) => `[${r.x.toFixed(0)},${r.y.toFixed(0)} ${r.w.toFixed(0)}x${r.h.toFixed(0)}]`;
+
 /* ------------------------------ 1. 메뉴 ------------------------------ */
 section('메뉴 · 렌더');
 const page = await newPage();
@@ -225,6 +251,63 @@ ok('조작 버튼 터치 영역 56px 이상', layout.rects.btnLeft.w >= 56 && la
 });
 console.log('    · HUD rects: ' + Object.entries(layout.rects).map(([k, r]) => `${k}[${r.x.toFixed(0)},${r.y.toFixed(0)} ${r.w.toFixed(0)}x${r.h.toFixed(0)}]`).join(' '));
 
+/* ------------------------------ 5b. 조작 좌우 반전 ------------------------------ */
+section('조작 좌우 반전 토글 (390×844)');
+const baseCtl = await controlLayout(page);
+ok('기본 배치: 조향 패드가 왼쪽', baseCtl.r.steerPad.right <= baseCtl.r.actionPad.x + 1, { steer: fmtRect(baseCtl.r.steerPad), action: fmtRect(baseCtl.r.actionPad) });
+ok('기본 배치: ◀ 가 ▶ 보다 왼쪽', baseCtl.r.btnLeft.x < baseCtl.r.btnRight.x, { left: baseCtl.r.btnLeft.x.toFixed(0), right: baseCtl.r.btnRight.x.toFixed(0) });
+ok('기본 배치: 버튼 겹침 없음', baseCtl.overlaps.length === 0, baseCtl.overlaps);
+ok('조향 버튼 확대(74px → 89px급)', baseCtl.r.btnLeft.w >= 84 && baseCtl.r.btnRight.w >= 84, { w: baseCtl.r.btnLeft.w.toFixed(1), h: baseCtl.r.btnLeft.h.toFixed(1) });
+ok('조향 패드·액션 패드 사이 간격 확보', baseCtl.r.steerPad.right <= baseCtl.r.actionPad.x - 4, { steerRight: baseCtl.r.steerPad.right.toFixed(1), actionX: baseCtl.r.actionPad.x.toFixed(1) });
+ok('기본 배치: 토글 OFF 상태', baseCtl.flipped === false && (await stateOf(page)).flipControls === false);
+
+// 일시정지 화면에서 바로 바꾸기
+await page.click('#btnPause');
+await sleep(450);
+ok('일시정지 화면 표시', await page.evaluate(() => !document.getElementById('pause').classList.contains('hidden')));
+ok('일시정지 화면에 좌우 반전 토글', !!(await page.$('#handBtnPause')));
+await page.click('#handBtnPause');
+await sleep(450);
+const flipCtl = await controlLayout(page);
+ok('반전: 조향 패드가 오른쪽으로 이동', flipCtl.r.steerPad.x > baseCtl.r.steerPad.x + 100, { before: baseCtl.r.steerPad.x.toFixed(0), after: flipCtl.r.steerPad.x.toFixed(0) });
+ok('반전: 액션 패드가 왼쪽으로 이동', flipCtl.r.actionPad.x < baseCtl.r.actionPad.x - 100, { before: baseCtl.r.actionPad.x.toFixed(0), after: flipCtl.r.actionPad.x.toFixed(0) });
+ok('반전: x 좌표가 실제로 좌우 교체(거울 대칭)',
+  isMirrored(baseCtl.r.steerPad, flipCtl.r.steerPad, baseCtl.vw) && isMirrored(baseCtl.r.actionPad, flipCtl.r.actionPad, baseCtl.vw),
+  { steerBase: fmtRect(baseCtl.r.steerPad), steerFlip: fmtRect(flipCtl.r.steerPad), actBase: fmtRect(baseCtl.r.actionPad), actFlip: fmtRect(flipCtl.r.actionPad) });
+ok('반전: ◀ 가 ▶ 보다 왼쪽 순서 유지', flipCtl.r.btnLeft.x < flipCtl.r.btnRight.x, { left: flipCtl.r.btnLeft.x.toFixed(0), right: flipCtl.r.btnRight.x.toFixed(0) });
+ok('반전: 버튼끼리 겹침 없음', flipCtl.overlaps.length === 0, flipCtl.overlaps);
+ok('반전: 버튼이 화면 밖으로 나가지 않음', flipCtl.outside.length === 0, flipCtl.outside);
+ok('반전: 터치 영역 56px 이상 유지', flipCtl.r.btnLeft.w >= 56 && flipCtl.r.btnDrift.w >= 56 && flipCtl.r.btnRight.w >= 56, { left: flipCtl.r.btnLeft.w.toFixed(0), drift: flipCtl.r.btnDrift.w.toFixed(0) });
+ok('반전: localStorage 저장', (await page.evaluate(() => localStorage.getItem('neon_ctrl_flip'))) === '1');
+console.log('    · 기본: ' + ['steerPad', 'actionPad', 'btnLeft', 'btnRight', 'btnDrift', 'btnNitro', 'btnBrake'].map((k) => `${k}=${fmtRect(baseCtl.r[k])}`).join(' '));
+console.log('    · 반전: ' + ['steerPad', 'actionPad', 'btnLeft', 'btnRight', 'btnDrift', 'btnNitro', 'btnBrake'].map((k) => `${k}=${fmtRect(flipCtl.r[k])}`).join(' '));
+
+// 레이스로 돌아가 반전 배치가 유지되고 터치가 실제로 먹는지
+await page.click('#btnResume');
+await sleep(500);
+ok('계속하기 후에도 반전 유지', (await stateOf(page)).flipControls === true && (await stateOf(page)).phase === 'racing');
+const flipLeftBox = await (await page.$('#btnLeft')).boundingBox();
+await page.mouse.move(flipLeftBox.x + flipLeftBox.width / 2, flipLeftBox.y + flipLeftBox.height / 2);
+await page.mouse.down();
+await sleep(400);
+ok('반전 후 오른쪽 ◀ 버튼 터치 동작', (await stateOf(page)).input.left === true, (await stateOf(page)).input);
+await page.mouse.up();
+await sleep(200);
+ok('반전 후 터치 해제', (await stateOf(page)).input.left === false);
+await shot(page, 'm13-controls-flip-race.png');
+
+// 다시 눌러 기본 배치로 복귀
+await page.click('#btnPause');
+await sleep(400);
+await page.click('#handBtnPause');
+await sleep(400);
+const backCtl = await controlLayout(page);
+ok('다시 누르면 기본 배치 복귀', !backCtl.flipped && Math.abs(backCtl.r.steerPad.x - baseCtl.r.steerPad.x) < 1 && isMirrored(backCtl.r.steerPad, flipCtl.r.steerPad, backCtl.vw), fmtRect(backCtl.r.steerPad));
+ok('기본으로 되돌린 설정 저장', (await page.evaluate(() => localStorage.getItem('neon_ctrl_flip'))) === '0');
+await page.click('#btnResume');
+await sleep(400);
+ok('기본 배치로 레이스 재개', (await stateOf(page)).phase === 'racing');
+
 /* ------------------------------ 6. 3D 렌더 품질 ------------------------------ */
 section('3D 렌더 · 픽셀 검사');
 const cs = await canvasStats(page);
@@ -273,9 +356,43 @@ section('가로 모드 (844×390)');
 const land = await newPage({ width: 844, height: 390 });
 await land.goto(`${BASE}/`, { waitUntil: 'networkidle0' });
 await sleep(1500);
+
+// 메뉴의 조작 좌우 반전 토글 + 새로고침 유지
+ok('메뉴에 조작 좌우 반전 토글', !!(await land.$('#handBtn')));
+ok('메뉴 토글 기본 라벨(왼쪽 조향)', /왼쪽 조향/.test(await land.$eval('#handBtn b', (e) => e.textContent)));
+await land.click('#handBtn');
+await sleep(350);
+ok('메뉴 토글로 HUD 반전 적용', await land.evaluate(() => document.getElementById('hud').classList.contains('flip')));
+ok('메뉴 토글 라벨 ON(오른쪽 조향)', /오른쪽 조향/.test(await land.$eval('#handBtn b', (e) => e.textContent)));
+await land.reload({ waitUntil: 'networkidle0' });
+await sleep(1600);
+ok('새로고침 후 반전 유지(클래스)', await land.evaluate(() => document.getElementById('hud').classList.contains('flip')));
+ok('새로고침 후 토글 상태 표시', /오른쪽 조향/.test(await land.$eval('#handBtn b', (e) => e.textContent)));
+ok('새로고침 후 설정 복원', (await stateOf(land)).flipControls === true);
+await shot(land, 'm08a-menu-flip.png');
+
 await land.click('#btnSolo');
 await waitState(land, (s) => s.phase === 'racing', 14000, 'landscape race');
 await sleep(800);
+
+// 가로 + 반전 배치
+const landFlip = await controlLayout(land);
+ok('가로 반전: 조향 패드가 오른쪽', landFlip.r.steerPad.x > landFlip.r.actionPad.x, { steer: fmtRect(landFlip.r.steerPad), action: fmtRect(landFlip.r.actionPad) });
+ok('가로 반전: ◀ 가 ▶ 보다 왼쪽', landFlip.r.btnLeft.x < landFlip.r.btnRight.x);
+ok('가로 반전: 버튼 겹침 없음', landFlip.overlaps.length === 0, landFlip.overlaps);
+ok('가로 반전: 버튼이 화면 안', landFlip.outside.length === 0, landFlip.outside);
+ok('가로 조향 버튼 확대(52px → 62px급)', landFlip.r.btnLeft.w >= 60, landFlip.r.btnLeft.w.toFixed(1));
+ok('가로 반전: 패드 사이 간격 확보', landFlip.r.actionPad.right <= landFlip.r.steerPad.x - 4, { actionRight: landFlip.r.actionPad.right.toFixed(1), steerX: landFlip.r.steerPad.x.toFixed(1) });
+await shot(land, 'm08b-landscape-flip.png');
+
+// 일시정지에서 기본 배치로 되돌리고 기존 가로 레이아웃 검사
+await land.evaluate(() => document.getElementById('btnPause').click());
+await sleep(400);
+await land.evaluate(() => document.getElementById('handBtnPause').click());
+await sleep(400);
+ok('가로: 기본 배치로 복귀', (await controlLayout(land)).flipped === false);
+await land.evaluate(() => document.getElementById('btnResume').click());
+await sleep(500);
 const landLayout = await land.evaluate(() => {
   const ids = ['hud-top', 'minimapWrap', 'gaugeWrap', 'btnLeft', 'btnRight', 'btnDrift', 'btnNitro', 'btnBrake'];
   const rects = {};

@@ -7,6 +7,7 @@
   --bg: #05030e;
   --panel: rgba(12, 14, 32, 0.82);
   --ctl: clamp(58px, min(9.4vh, 19vw), 86px);
+  --ctl-steer: calc(var(--ctl) * 1.2);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
 }
@@ -113,11 +114,11 @@ html, body {
   position: absolute; left: 0; right: 0; bottom: 0;
   height: calc(var(--safe-b) + 142px);
   display: flex; align-items: flex-end; justify-content: space-between;
-  padding: 0 12px calc(var(--safe-b) + 6px);
+  padding: 0 10px calc(var(--safe-b) + 6px);
   pointer-events: none;
 }
-#steerPad { display: flex; gap: 10px; pointer-events: auto; }
-#actionPad { position: relative; width: 178px; height: calc(var(--ctl) * 1.62); pointer-events: auto; }
+#steerPad { display: flex; gap: 8px; pointer-events: auto; }
+#actionPad { position: relative; width: clamp(136px, 44vw, 172px); height: calc(var(--ctl) * 1.62); pointer-events: auto; }
 .touchBtn {
   border: none; font-family: inherit; font-weight: 900; color: #eaf7ff;
   background: radial-gradient(circle at 35% 30%, rgba(45, 70, 130, .55), rgba(10, 14, 32, .72));
@@ -132,8 +133,8 @@ html, body {
   box-shadow: 0 0 26px rgba(60, 220, 255, .65), inset 0 0 22px rgba(120, 230, 255, .45);
 }
 .touchBtn.steer {
-  width: var(--ctl); height: var(--ctl); border-radius: 50%;
-  font-size: calc(var(--ctl) * 0.42); line-height: 1;
+  width: var(--ctl-steer); height: var(--ctl-steer); border-radius: 50%;
+  font-size: calc(var(--ctl-steer) * 0.4); line-height: 1;
   display: flex; align-items: center; justify-content: center;
 }
 #btnDrift {
@@ -159,6 +160,14 @@ html, body {
   box-shadow: 0 0 14px rgba(255, 60, 130, .22);
 }
 #btnBrake.on { background: radial-gradient(circle at 35% 30%, rgba(255, 120, 170, .8), rgba(130, 15, 60, .9)); box-shadow: 0 0 24px rgba(255, 60, 130, .7); }
+
+/* ---------------- 조작 좌우 반전 (#hud.flip) ----------------
+   기본: 왼쪽 조향 피드 / 오른쪽 액션 피드
+   반전: 좌우를 거울처럼 뒤집는다(◀ 는 ▶ 의 왼쪽 순서 유지, 여백·터치 영역 동일) */
+#hud.flip #controls { flex-direction: row-reverse; }
+#hud.flip #btnDrift { right: auto; left: 0; }
+#hud.flip #btnNitro { left: auto; right: 0; }
+#hud.flip #btnBrake { left: auto; right: 2px; }
 
 /* ---------------- 이펙트 오버레이 ---------------- */
 #speedlines {
@@ -241,6 +250,7 @@ input::placeholder { color: #5c7599; }
 .optToggle b { font-size: 11px; color: #6c86a8; }
 .optToggle.on { border-color: rgba(80, 240, 200, .5); color: #d8fff4; }
 .optToggle.on b { color: var(--green); text-shadow: 0 0 10px rgba(57, 255, 158, .8); }
+.optToggle.wide { width: 100%; }
 
 .bigBtn {
   width: 100%; height: 56px; border-radius: 15px; border: none; cursor: pointer;
