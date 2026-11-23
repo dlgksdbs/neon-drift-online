@@ -7,7 +7,9 @@
   --bg: #05030e;
   --panel: rgba(12, 14, 32, 0.82);
   --ctl: clamp(58px, min(9.4vh, 19vw), 86px);
-  --wheel: clamp(104px, 31vw, 138px);
+  /* 와이드 레이싱 핸들: 가로가 세로보다 1.32배 긴 타원 */
+  --wheel-h: clamp(128px, 36vw, 160px);
+  --wheel-w: calc(var(--wheel-h) * 1.32);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
 }
@@ -161,7 +163,7 @@ html, body {
 #steerPad { display: flex; align-items: flex-end; pointer-events: auto; }
 
 #wheel {
-  position: relative; width: var(--wheel); height: var(--wheel); border-radius: 50%;
+  position: relative; width: var(--wheel-w); height: var(--wheel-h); border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   touch-action: none; cursor: grab;
   background: radial-gradient(circle at 36% 28%, rgba(34, 70, 130, .6), rgba(6, 10, 24, .78) 72%);
@@ -178,6 +180,7 @@ html, body {
 #wheel svg { width: 100%; height: 100%; display: block; overflow: visible; filter: drop-shadow(0 0 6px rgba(60, 210, 255, .5)); }
 #wheel .wRim { fill: none; stroke: url(#rimGrad); stroke-width: 7; }
 #wheel .wGrip { fill: none; stroke: rgba(160, 240, 255, .5); stroke-width: 2; stroke-dasharray: 2.5 6.5; }
+#wheel .wGripPad { fill: none; stroke: rgba(115, 220, 255, .34); stroke-width: 14; stroke-linecap: round; }
 #wheel .wSpokes line { stroke: rgba(155, 230, 255, .9); stroke-width: 6.5; stroke-linecap: round; }
 #wheel .wHub { fill: url(#hubGrad); stroke: rgba(190, 250, 255, .75); stroke-width: 2; }
 #wheel .wHubDot { fill: #e6feff; }
@@ -396,7 +399,7 @@ input::placeholder { color: #5c7599; }
 @media (orientation: landscape) and (max-height: 560px) {
   :root {
     --ctl: clamp(52px, 13vh, 66px);
-    --wheel: clamp(92px, 26vh, 112px);
+    --wheel-h: clamp(98px, 27vh, 124px);
   }
   #gaugeWrap { bottom: calc(var(--safe-b) + 118px); }
   #controls { height: calc(var(--safe-b) + 118px); }

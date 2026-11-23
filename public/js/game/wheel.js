@@ -39,12 +39,15 @@ export class SteeringWheel {
 
   _center() {
     const r = this.el.getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2, r: r.width / 2 };
+    // 가로로 긴 타원 핸들: 반지름도 가로·세로로 따로 둔다
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2, rx: r.width / 2, ry: r.height / 2 };
   }
 
-  /* 화면 위쪽 = 0°, 시계방향 = + */
+  /* 화면 위쪽 = 0°, 시계방향 = +
+     타원을 정규화한 각도이라서, 가로로 긴 핸들의 테두리를 따라 손가락이 돌면
+     화면상 각도와 상관없이 핸들이 자연스럽게 같은 만큼 돌아간다. */
   _angleAt(x, y, c) {
-    return Math.atan2(x - c.x, -(y - c.y)) * 180 / Math.PI;
+    return Math.atan2((x - c.x) / c.rx, -(y - c.y) / c.ry) * 180 / Math.PI;
   }
 
   _down(e) {
@@ -54,7 +57,8 @@ export class SteeringWheel {
     this._pointerId = e.pointerId;
     this._lastAngle = this._angleAt(e.clientX, e.clientY, c);
     this._lastX = e.clientX;
-    this._nearCenter = Math.hypot(e.clientX - c.x, e.clientY - c.y) < c.r * 0.24;
+    // 중심(허브)을 잡았는지 — 가로로 긴 타원 기준 상대 거리
+    this._nearCenter = Math.hypot((e.clientX - c.x) / c.rx, (e.clientY - c.y) / c.ry) < 0.26;
     this.rot.classList.remove('anim');
     this.el.classList.add('on');
     try { this.el.setPointerCapture(e.pointerId); } catch (err) { /* noop */ }

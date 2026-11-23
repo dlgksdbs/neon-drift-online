@@ -5,7 +5,7 @@
    ============================================================================= */
 import * as THREE from 'three';
 import { TRACK, buildPads, nearest, sample } from './core/track.js';
-import { CAR_SPECS, createCar, stepCarFixed, kmh } from './core/physics.js';
+import { CAR_SPECS, createCar, stepCarFixed, kmh, resolveCarCollisions } from './core/physics.js';
 import { RaceProgress, rankRacers, formatTime } from './core/progress.js';
 import { createAIProfile, aiInput } from './core/ai.js';
 import { createScene } from './game/scene.js';
@@ -50,6 +50,8 @@ const app = {
   finishAt: 0,
   resultsShown: false,
   ranked: [],
+  collisionCount: 0,
+  lastCollision: null,
 };
 
 /* ----------------------------- 3D 기반 ----------------------------- */
@@ -383,6 +385,8 @@ function beginCountdown() {
   hideAllScreens();
   hud.show();
   app.phase = 'countdown';
+  app.collisionCount = 0;
+  app.lastCollision = null;
   app.countdownStart = performance.now();
   app.countdownStep = -1;
   const cd = $('countdown');
@@ -414,7 +418,11 @@ function raceElapsed() { return app.simTime; }
 function updateRacers(dt) {
   const me = app.racers.find((r) => r.isMe);
   const frozen = app.phase !== 'racing';
+  const nearFns = new Map();
+  for (const r of app.racers) if (!r.isRemote) nearFns.set(r.car, nearestFor(r));
 
+  // ---- 1단계: 모든 차량 물리 진행
+  const stepped = [];
   for (const r of app.racers) {
     if (frozen && !r.isRemote) {
       // 카운트다운: 제자리 대기 (살짝 떨림만)
@@ -423,7 +431,7 @@ function updateRacers(dt) {
     }
     if (r.isRemote) { updateRemote(r, dt); continue; }
 
-    const nearFn = nearestFor(r);
+    const nearFn = nearFns.get(r.car);
     const q = nearFn(r.car.x, r.car.z);
     let inp;
     if (r.isMe) {
@@ -433,6 +441,35 @@ function updateRacers(dt) {
       inp = aiInput(r.ai, r.car, q.s, app.simTime, TRACK);
     }
     const ev = stepCarFixed(r.car, inp, dt, { track: TRACK, pads: PADS, nearest: nearFn });
+    stepped.push({ r, ev });
+  }
+
+  // ---- 2단계: 차량끼리 부딪친다 (나 · AI · 네트워크 상대 차량)
+  if (!frozen && app.racers.length > 1) {
+    const events = resolveCarCollisions(app.racers.map((r) => r.car), {
+      track: TRACK,
+      nearestFor: (car) => { const fn = nearFns.get(car); return fn ? fn(car.x, car.z) : null; },
+    });
+    for (const hit of events) {
+      if (hit.impact < 1.5) continue;
+      app.collisionCount++;
+      app.lastCollision = { at: performance.now(), impact: hit.impact };
+      const mine = app.racers.find((r) => r.isMe && (r.car === hit.a || r.car === hit.b));
+      const strength = Math.min(1, hit.impact / 24);
+      // 같은 접촉이 매 프레임 스파크를 뿜지 않도록 짧게 막는다
+      if (hit.a.collideFx <= 0 && hit.b.collideFx <= 0) {
+        effects.spawnSpark(hit.x, 0.8, hit.z, 7 + Math.round(strength * 16), 0xffc98a, 10, 5);
+        effects.spawnSpark(hit.x, 0.55, hit.z, 3 + Math.round(strength * 8), 0xfff3d6, 6, 3);
+        hit.a.collideFx = 0.09;
+        hit.b.collideFx = 0.09;
+      }
+      if (mine) camState.shake = Math.min(0.7, camState.shake + 0.08 + strength * 0.5);
+    }
+  }
+
+  // ---- 3단계: 진행도 · 이펙트 · 메시 갱신
+  for (const { r, ev } of stepped) {
+    const nearFn = nearFns.get(r.car);
     const q2 = nearFn(r.car.x, r.car.z);
 
     if (app.phase === 'racing') {
@@ -732,8 +769,11 @@ function startMultiRace(room) {
       gridIndex: i, label: p.name,
     });
   });
-  // 원격 레이서 플래그
-  for (const r of app.racers) r.isRemote = !r.isMe;
+  // 원격 레이서 플래그 (위치는 네트워크가 정한다: 충돌에서 밀리지 않음)
+  for (const r of app.racers) {
+    r.isRemote = !r.isMe;
+    if (r.isRemote) r.car.collisionInvMass = 0;
+  }
   beginCountdown();
 }
 
@@ -1093,6 +1133,9 @@ function boot() {
         board: rows,
         boardVisible: !document.getElementById('board').closest('.hidden') && !document.getElementById('hud').classList.contains('hidden'),
         racers: app.racers.length,
+        collisionCount: app.collisionCount,
+        lastCollision: app.lastCollision,
+        contacts: app.racers.map((r) => ({ id: r.id, contact: r.car.contact || 0 })),
         finished: me ? me.prog.finished : false,
         resultsShown: app.resultsShown,
         roomCode: app.room ? app.room.code : null,

@@ -45,7 +45,7 @@
       <div id="steerPad">
         <div id="wheel" role="slider" aria-label="핸들" aria-valuemin="-1" aria-valuemax="1" aria-valuenow="0" tabindex="0">
           <div class="wheelRot" id="wheelRot">
-            <svg viewBox="-50 -50 100 100" aria-hidden="true">
+            <svg viewBox="-70 -52 140 104" aria-hidden="true">
               <defs>
                 <radialGradient id="hubGrad" cx="38%" cy="30%" r="70%">
                   <stop offset="0%" stop-color="#7ff6ff"/>
@@ -58,16 +58,20 @@
                   <stop offset="100%" stop-color="#1a2a5e"/>
                 </linearGradient>
               </defs>
-              <circle class="wRim" cx="0" cy="0" r="44" />
-              <circle class="wGrip" cx="0" cy="0" r="44" />
+              <!-- 가로로 긴 타원 림 (와이드 레이싱 핸들) -->
+              <ellipse class="wRim" cx="0" cy="0" rx="61" ry="44" />
+              <ellipse class="wGrip" cx="0" cy="0" rx="61" ry="44" />
+              <!-- 3시·9시 손잡이 굵은 그립 -->
+              <path class="wGripPad" d="M53 -22 A61 44 0 0 1 53 22" />
+              <path class="wGripPad" d="M-53 22 A61 44 0 0 1 -53 -22" />
               <g class="wSpokes">
-                <line x1="-40" y1="7" x2="-9" y2="3" />
-                <line x1="40" y1="7" x2="9" y2="3" />
-                <line x1="0" y1="40" x2="0" y2="9" />
+                <line x1="-55" y1="5" x2="-12" y2="2" />
+                <line x1="55" y1="5" x2="12" y2="2" />
+                <line x1="0" y1="38" x2="0" y2="9" />
               </g>
-              <circle class="wHub" cx="0" cy="0" r="12" />
-              <circle class="wHubDot" cx="0" cy="0" r="3.4" />
-              <path class="wMark" d="M0 -47 L-5 -37 L5 -37 Z" />
+              <circle class="wHub" cx="0" cy="0" r="13" />
+              <circle class="wHubDot" cx="0" cy="0" r="3.6" />
+              <path class="wMark" d="M0 -51 L-5.5 -40 L5.5 -40 Z" />
             </svg>
           </div>
         </div>

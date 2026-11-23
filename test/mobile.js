@@ -103,11 +103,12 @@ async function wheelState(p) {
     return { deg, angle: window.__neon.wheel.angle, value: window.__neon.wheel.value, dragging: window.__neon.wheel.dragging };
   });
 }
-/* 핸들 원주 위 각도(위=0°, 시계방향 +)로 포인터 이동 */
+/* 핸들 타원 테두리 위 각도(위=0°, 시계방향 +)로 포인터 이동 */
 async function wheelPoint(p, deg) {
   const box = await (await p.$('#wheel')).boundingBox();
-  const cx = box.x + box.width / 2, cy = box.y + box.height / 2, r = box.width * 0.36;
-  return { x: cx + Math.sin((deg * Math.PI) / 180) * r, y: cy - Math.cos((deg * Math.PI) / 180) * r };
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  const rx = box.width * 0.36, ry = box.height * 0.36;
+  return { x: cx + Math.sin((deg * Math.PI) / 180) * rx, y: cy - Math.cos((deg * Math.PI) / 180) * ry };
 }
 async function dragWheelStart(p, deg) {
   const a = await wheelPoint(p, deg);
@@ -217,8 +218,7 @@ ok('색상 스와치 6개', (await page.$$('.swatch')).length === 6);
 ok('닉네임 입력란', !!(await page.$('#nickInput')));
 ok('솔로 시작 버튼', !!(await page.$('#btnSolo')));
 ok('친구 대결 버튼', !!(await page.$('#btnMulti')));
-ok('원형 핸들 존재', !!(await page.$('#wheel')) && !!(await page.$('#wheelRot svg')));
-ok('◀ ▶ 버튼 제거됨', (await page.$$('#btnLeft, #btnRight')).length === 0);
+ok('원형 핸들 존재', !!(await page.$('#wheel')) && !!(await page.$('#wheelRot svg')));ok('◀ ▶ 버튼 제거됨', (await page.$$('#btnLeft, #btnRight')).length === 0);
 ok('DRIFT 버튼/게이지 요소 없음', await page.evaluate(() => !document.getElementById('btnDrift') && !document.getElementById('driftFill') && document.querySelectorAll('.bar.drift').length === 0));
 ok('메뉴 안내가 핸들 조작', /핸들/.test(await page.$eval('#footHint', (e) => e.textContent)));
 const menuShot = await shot(page, 'm01-menu.png');
@@ -302,12 +302,25 @@ await sleep(500);
 ok('3인칭 복귀', (await stateOf(page)).camMode === 'third');
 
 /* ------------------------------ 5. 핸들 조향 ------------------------------ */
-section('원형 핸들 조향 (드래그 · 회전 · 복원)');
+section('와이드 핸들 조향 (드래그 · 회전 · 복원)');
 const wheelSize = await page.evaluate(() => {
   const b = document.getElementById('wheel').getBoundingClientRect();
-  return { w: b.width, h: b.height, round: Math.abs(b.width - b.height) < 1 };
+  const svg = document.querySelector('#wheelRot svg');
+  const vb = (svg.getAttribute('viewBox') || '0 0 1 1').split(/\s+/).map(Number);
+  return { w: b.width, h: b.height, ratio: b.width / b.height, vbRatio: Math.abs(vb[2]) / Math.abs(vb[3]) };
 });
-ok('핸들이 원형', wheelSize.round && wheelSize.w >= 100, wheelSize);
+ok('핸들이 가로로 긴 타원 (가로가 1.2~1.45배)', wheelSize.ratio > 1.2 && wheelSize.ratio < 1.45, wheelSize);
+ok('핸들 크기 확대 (가로 165px 이상)', wheelSize.w >= 165, wheelSize.w.toFixed(1));
+ok('핸들 그림 자체도 가로로 긴 형태', wheelSize.vbRatio > 1.2, wheelSize.vbRatio.toFixed(2));
+ok('핸들 세로 높이 120px 이상', wheelSize.h >= 120, wheelSize.h.toFixed(1));
+{
+  const wb = await (await page.$('#wheel')).boundingBox();
+  await page.screenshot({
+    path: path.join(SHOTS, 'm16-wheel-wide.png'),
+    clip: { x: Math.max(0, wb.x - 8), y: Math.max(0, wb.y - 8), width: wb.width + 16, height: wb.height + 16 },
+  });
+  ok('넓힌 핸들 확대 스크린샷 저장', fs.existsSync(path.join(SHOTS, 'm16-wheel-wide.png')));
+}
 const wheel0 = await wheelState(page);
 ok('출발 시 핸들 정면(0°)', Math.abs(wheel0.deg) < 1 && Math.abs(wheel0.value) < 0.02, wheel0);
 
@@ -369,8 +382,9 @@ await resetOnTrack(page);
 const touchBefore = await stateOf(page);
 {
   const box = await (await page.$('#wheel')).boundingBox();
-  const cx = box.x + box.width / 2, cy = box.y + box.height / 2, r = box.width * 0.36;
-  const pt = (deg) => ({ x: cx + Math.sin((deg * Math.PI) / 180) * r, y: cy - Math.cos((deg * Math.PI) / 180) * r });
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  const rx = box.width * 0.36, ry = box.height * 0.36;
+  const pt = (deg) => ({ x: cx + Math.sin((deg * Math.PI) / 180) * rx, y: cy - Math.cos((deg * Math.PI) / 180) * ry });
   const a = pt(0);
   await page.touchscreen.touchStart(a.x, a.y);
   for (let i = 1; i <= 8; i++) { const q = pt((75 * i) / 8); await page.touchscreen.touchMove(q.x, q.y); await sleep(18); }
@@ -391,6 +405,92 @@ ok('키보드 조향 시 핸들도 회전', keyWheel.deg > 20, keyWheel);
 await page.keyboard.up('ArrowRight');
 await sleep(1200);
 ok('키보드 해제 후 핸들 복원', Math.abs((await wheelState(page)).deg) < 2);
+
+/* ------------------------------ 5-2. 차량 충돌 ------------------------------ */
+section('차량 충돌 (달리는 AI 차와 부딪힌다)');
+{
+  const setup = await page.evaluate(() => {
+    const n = window.__neon;
+    const me = n.app.racers.find((r) => r.isMe);
+    const ai = n.app.racers.find((r) => r.isAI);
+    const T = n.TRACK;
+    const place = (car, s, v) => {
+      const i = Math.floor(s / T.segLen) % T.n;
+      car.x = T.xs[i]; car.z = T.zs[i]; car.h = T.heading[i];
+      car.vx = Math.sin(car.h) * v; car.vz = Math.cos(car.h) * v;
+      car._hint = i;
+    };
+    // 스타트 직선에서 앞차 바로 뒤로 붙여 추돌시킨다
+    place(ai.car, 46.5, 8);
+    place(me.car, 40, 36);
+    ai.prog.reset(46.5, n.app.simTime);
+    me.prog.reset(40, n.app.simTime);
+
+    // 차체 캡슐 겹침을 매 프레임 기록 (뚫고 지나가면 큰 음수가 된다)
+    window.__minGap = Infinity;
+    window.__gapOn = true;
+    const R = n.app.racers;
+    const OFF = [-1.18, 0, 1.18];
+    const gap = (a, b) => {
+      let best = Infinity;
+      for (const oa of OFF) {
+        const ax = a.x + Math.sin(a.h) * oa, az = a.z + Math.cos(a.h) * oa;
+        for (const ob of OFF) {
+          const bx = b.x + Math.sin(b.h) * ob, bz = b.z + Math.cos(b.h) * ob;
+          best = Math.min(best, Math.hypot(bx - ax, bz - az) - 1.94);
+        }
+      }
+      return best;
+    };
+    const tick = () => {
+      if (!window.__gapOn) return;
+      for (let i = 0; i < R.length; i++) {
+        for (let j = i + 1; j < R.length; j++) window.__minGap = Math.min(window.__minGap, gap(R[i].car, R[j].car));
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+
+    // 부딪힌 바로 그 프레임에서 멈춰 세운다 (스파크가 살아 있는 순간을 화면에 남기려고)
+    window.__baseline = n.app.collisionCount;
+    window.__autoPause = true;
+    const watch = () => {
+      if (!window.__autoPause) return;
+      if (n.app.collisionCount > window.__baseline) { n.app.phase = 'paused'; window.__autoPause = false; return; }
+      requestAnimationFrame(watch);
+    };
+    requestAnimationFrame(watch);
+    return { collisionCount: n.app.collisionCount };
+  });
+
+  let hitShot = false;
+  for (let i = 0; i < 50; i++) {
+    await sleep(70);
+    const st = await stateOf(page);
+    if (st.collisionCount > setup.collisionCount) {
+      if (!hitShot) {
+        // 멈춘 프레임을 두 번 그려 카메라/스파크가 반영된 화면을 저장한 뒤 다시 달린다
+        await page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))));
+        await sleep(120);
+        await shot(page, 'm15-car-collision.png');
+        hitShot = true;
+      }
+      await page.evaluate(() => { window.__neon.app.phase = 'racing'; });
+      if (i > 14) break;
+    }
+  }
+  await page.evaluate(() => { window.__neon.app.phase = 'racing'; });
+  const gapRes = await page.evaluate(() => {
+    window.__gapOn = false;
+    return { minGap: window.__minGap, count: window.__neon.app.collisionCount };
+  });
+  const afterHit = await stateOf(page);
+  ok('달리는 차끼리 부딪힌다 (추돌)', gapRes.count > setup.collisionCount, gapRes);
+  ok('부딪히는 순간 스크린샷 저장', hitShot && fs.existsSync(path.join(SHOTS, 'm15-car-collision.png')));
+  ok('부딪혀도 서로 뚫고 지나가지 않는다', gapRes.minGap > -0.4, gapRes.minGap);
+  ok('충돌 후에도 멈추지 않고 달린다', afterHit.kmh > 3, afterHit.kmh);
+  console.log('    · 충돌 ' + (gapRes.count - setup.collisionCount) + '회, 최소 틈 ' + gapRes.minGap.toFixed(2) + 'm');
+}
 
 /* ------------------------------ 6. HUD 겹침 ------------------------------ */
 section('HUD 레이아웃 · 겹침 0 (390×844)');

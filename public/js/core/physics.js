@@ -26,6 +26,21 @@ export const CAR_SPECS = {
 export const WALL_LIMIT = 8.35;      // 차량 중심이 갈 수 있는 최대 |lateral|
 export const GRAVITY_NONE = 0;
 
+/* 차체 근사: 차체 축을 따라 놓인 3개 원(캡슐) — 길이 4.3m · 폭 1.94m
+   carModel 의 L 4.24 / W 1.94 와 맞춘 값이다. */
+export const CAR_BODY = {
+  halfLength: 2.12,
+  halfWidth: 0.97,
+  radius: 0.97,
+  offsets: [-1.18, 0, 1.18],
+};
+
+/* 차량끼리 부딪힐 때의 손맛 계수 */
+const HIT_RESTITUTION = 0.34;   // 반발 계수
+const HIT_FRICTION = 0.32;      // 옆으로 비빌 때의 마찰
+const HIT_MAX_IMPULSE = 30;     // 폭발 방지 상한
+const HIT_YAW = 0.0022;         // 비껴 맞으면 차체가 살짝 돌아간다
+
 export function createCar(spec, opts = {}) {
   return {
     spec,
@@ -38,6 +53,8 @@ export function createCar(spec, opts = {}) {
     padFlash: 0, padEvent: -1,
     distance: 0, finished: false,
     wheelSpin: 0,
+    contact: 0, collideFx: 0,
+    collisionInvMass: 1,   // 0 이면 밀리지 않는 차(네트워크로 위치를 받는 상대 차량)
   };
 }
 
@@ -144,6 +161,9 @@ export function stepCar(car, input, dt, world = {}) {
     }
   }
 
+  if (car.collideFx > 0) car.collideFx = Math.max(0, car.collideFx - dt);
+  car.contact = 0;
+
   // --- 부스터 패드
   if (world.pads && world.pads.length && car.padCooldown <= 0) {
     for (const p of world.pads) {
@@ -165,6 +185,134 @@ export function stepCar(car, input, dt, world = {}) {
 
   car.speed = Math.hypot(car.vx, car.vz);
   return car;
+}
+
+/* =============================================================================
+   차량 간 충돌 — 차체 축 3개 원(캡슐) 근사
+   - 겹침 해소(밀어내기) + 상대 속도 기반 반발 + 접선 마찰(비비기)
+   - 비껴 맞으면 차체가 살짝 돌아가고, 정면/측면 어느 쪽이든 서로 통과하지 않는다
+   - world.track + world.nearestFor(car) 를 주면 밀려난 차가 가드레일 밖으로
+     나가지 않도록 벽 제한을 함께 적용한다
+   반환: 이번 프레임에 실제로 부딪힌 목록 [{ a, b, x, z, impact, nx, nz }]
+   ============================================================================= */
+export function resolveCarCollisions(cars, world = {}) {
+  const events = [];
+  const n = cars.length;
+  if (n < 2) return events;
+  const bodyR2 = CAR_BODY.radius * 2;
+  const offs = CAR_BODY.offsets;
+  const sx = new Array(n), sz = new Array(n), inv = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const c = cars[i];
+    sx[i] = Math.sin(c.h); sz[i] = Math.cos(c.h);
+    inv[i] = c.collisionInvMass === undefined ? 1 : c.collisionInvMass;
+  }
+
+  for (let iter = 0; iter < 2; iter++) {
+    for (let i = 0; i < n; i++) {
+      const A = cars[i];
+      for (let j = i + 1; j < n; j++) {
+        const B = cars[j];
+        const invA = inv[i], invB = inv[j];
+        const invSum = invA + invB;
+        if (invSum <= 0) continue;
+        const dcx = B.x - A.x, dcz = B.z - A.z;
+        if (dcx * dcx + dcz * dcz > 64) continue;      // 넓은 단계: 중심 8m
+
+        // 가장 깊게 겹친 원 쌍
+        let pen = 0, nx = 0, nz = 1, offA = 0, offB = 0;
+        for (let a = 0; a < offs.length; a++) {
+          const ax = A.x + sx[i] * offs[a], az = A.z + sz[i] * offs[a];
+          for (let b = 0; b < offs.length; b++) {
+            const dx = (B.x + sx[j] * offs[b]) - ax;
+            const dz = (B.z + sz[j] * offs[b]) - az;
+            const d = Math.hypot(dx, dz);
+            const p = bodyR2 - d;
+            if (p > pen) {
+              pen = p; offA = offs[a]; offB = offs[b];
+              if (d > 1e-4) { nx = dx / d; nz = dz / d; }
+              else { nx = sx[i]; nz = -sz[i]; }
+            }
+          }
+        }
+        if (pen <= 0) continue;
+
+        // 겹침 해소 (질량 역수 비율로 나눠 민다)
+        const corr = Math.min(pen, 1.6) * 0.85;
+        A.x -= nx * corr * (invA / invSum);
+        A.z -= nz * corr * (invA / invSum);
+        B.x += nx * corr * (invB / invSum);
+        B.z += nz * corr * (invB / invSum);
+
+        // 상대 속도 기반 반발
+        const vn = (B.vx - A.vx) * nx + (B.vz - A.vz) * nz;
+        let impact = 0;
+        if (vn < -0.05) {
+          const jn = Math.min(HIT_MAX_IMPULSE, -(1 + HIT_RESTITUTION) * vn / invSum);
+          A.vx -= nx * jn * invA; A.vz -= nz * jn * invA;
+          B.vx += nx * jn * invB; B.vz += nz * jn * invB;
+          impact = -vn;
+
+          // 접선 마찰 — 옆으로 비비며 달릴 때 서로 잡아끈다
+          const tx = -nz, tz = nx;
+          const vt = (B.vx - A.vx) * tx + (B.vz - A.vz) * tz;
+          const jt = -vt * HIT_FRICTION / invSum;
+          A.vx -= tx * jt * invA; A.vz -= tz * jt * invA;
+          B.vx += tx * jt * invB; B.vz += tz * jt * invB;
+
+          // 비껴 맞은 쪽은 차체가 살짝 돌아간다
+          const kickA = HIT_YAW * offA * jn * ((-nx) * Math.cos(A.h) + nz * Math.sin(A.h));
+          const kickB = HIT_YAW * offB * jn * (nx * Math.cos(B.h) - nz * Math.sin(B.h));
+          A.h += Math.max(-0.06, Math.min(0.06, kickA));
+          B.h += Math.max(-0.06, Math.min(0.06, kickB));
+
+          A.contact = Math.max(A.contact, impact);
+          B.contact = Math.max(B.contact, impact);
+        }
+
+        // 차체 중심이 아니라 실제 접촉점 근처에서 스파크가 튀도록
+        const mx = A.x + sx[i] * offA * 0.5 + B.x + sx[j] * offB * 0.5;
+        const mz = A.z + sz[i] * offA * 0.5 + B.z + sz[j] * offB * 0.5;
+        events.push({ a: A, b: B, x: mx / 2, z: mz / 2, impact, nx, nz });
+      }
+    }
+
+    // 밀려난 차가 가드레일 밖으로 나가지 않게
+    if (world.track && typeof world.nearestFor === 'function') {
+      const limit = world.track.wallLimit === undefined ? WALL_LIMIT : world.track.wallLimit;
+      for (let i = 0; i < n; i++) {
+        if (inv[i] <= 0) continue;
+        const c = cars[i];
+        const q = world.nearestFor(c);
+        if (!q) continue;
+        const lat = q.lateral;
+        if (Math.abs(lat) > limit) {
+          const side = Math.sign(lat);
+          const over = Math.abs(lat) - limit;
+          c.x -= q.nx * side * over;
+          c.z -= q.nz * side * over;
+          const vo = c.vx * q.nx * side + c.vz * q.nz * side;
+          if (vo > 0) { c.vx -= q.nx * side * vo * 1.1; c.vz -= q.nz * side * vo * 1.1; }
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < n; i++) {
+    const c = cars[i];
+    c.speed = Math.hypot(c.vx, c.vz);
+  }
+  // 이번 프레임에 여러 번 잡힌 같은 쌍은 가장 센 한 번만 남긴다
+  const indexOf = new Map();
+  for (let i = 0; i < n; i++) indexOf.set(cars[i], i);
+  const best = new Map();
+  for (const e of events) {
+    const ia = indexOf.get(e.a), ib = indexOf.get(e.b);
+    const k = ia < ib ? `${ia}:${ib}` : `${ib}:${ia}`;
+    const prev = best.get(k);
+    if (!prev || e.impact > prev.impact) best.set(k, e);
+  }
+  return [...best.values()];
 }
 
 /* 실제 속도(km/h) 표시용 */

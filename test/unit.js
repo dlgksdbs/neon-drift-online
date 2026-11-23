@@ -3,7 +3,7 @@
    실행: node test/unit.js
    ============================================================================= */
 import { TRACK, TRACK_DEF, buildTrack, nearest, sample, buildPads } from '../public/js/core/track.js';
-import { CAR_SPECS, createCar, stepCar, stepCarFixed, kmh, WALL_LIMIT } from '../public/js/core/physics.js';
+import { CAR_SPECS, createCar, stepCar, stepCarFixed, kmh, WALL_LIMIT, CAR_BODY, resolveCarCollisions } from '../public/js/core/physics.js';
 import { RaceProgress, rankRacers, formatTime } from '../public/js/core/progress.js';
 import { createAIProfile, aiInput, minRadiusAhead } from '../public/js/core/ai.js';
 import * as physics from '../public/js/core/physics.js';
@@ -16,6 +16,19 @@ function ok(name, cond, extra) {
 }
 function near(a, b, tol) { return Math.abs(a - b) <= tol; }
 function section(t) { console.log('\n■ ' + t); }
+
+/* 차체 캡슐(3원) 사이의 가장 가까운 틈: 0 보다 작으면 겹침 */
+function bodyGap(a, b) {
+  let best = Infinity;
+  for (const oa of CAR_BODY.offsets) {
+    const ax = a.x + Math.sin(a.h) * oa, az = a.z + Math.cos(a.h) * oa;
+    for (const ob of CAR_BODY.offsets) {
+      const bx = b.x + Math.sin(b.h) * ob, bz = b.z + Math.cos(b.h) * ob;
+      best = Math.min(best, Math.hypot(bx - ax, bz - az) - CAR_BODY.radius * 2);
+    }
+  }
+  return best;
+}
 
 const pads = buildPads(TRACK);
 const worldFor = (car) => {
@@ -58,6 +71,8 @@ for (let i = 0; i < TRACK.n; i += 2) {
   }
 }
 ok('도로 폭 2배 이상 이격', minSep > TRACK.halfWidth * 2 + 6, minSep.toFixed(1));
+ok('도로 폭이 차체 폭의 4배 이상', TRACK.halfWidth * 2 > CAR_BODY.halfWidth * 2 * 4, TRACK.halfWidth);
+ok('가드레일 한계가 도로 폭과 일치', Math.abs(TRACK.wallLimit - (TRACK.halfWidth - 0.65)) < 1e-9 && near(TRACK.wallLimit, WALL_LIMIT, 0.01), { wallLimit: TRACK.wallLimit, WALL_LIMIT });
 
 // 시작선은 직선
 const startCurv = TRACK.curvature[0];
@@ -268,7 +283,83 @@ section('충돌 · 트랙 이탈 방지');
   ok('벽 충돌 후 속도 손실', c2.speed < fullSpeed * 1.05, { full: fullSpeed.toFixed(1), after: c2.speed.toFixed(1) });
 }
 
-/* ---------------------------------- 3. 랩/체크포인트 ---------------------------------- */
+/* ---------------------------------- 3. 차량끼리 충돌 ---------------------------------- */
+section('차량 간 충돌 (부딪히면 통과하지 않는다)');
+{
+  const flat = flatWorld(0, 0);
+
+  // 정면 충돌: 서로 마주 보고 돌진
+  const A = createCar(CAR_SPECS.coupe, { x: 0, z: 0, h: Math.PI / 2 });    // +x 로 달린다
+  const B = createCar(CAR_SPECS.coupe, { x: 9, z: 0, h: -Math.PI / 2 });   // -x 로 달린다
+  A.vx = 22; A.vz = 0; B.vx = -22; B.vz = 0;
+  let hits = 0, passed = false, firstBefore = 0, firstAfter = 0;
+  for (let f = 0; f < 120; f++) {
+    stepCarFixed(A, { throttle: 1 }, 1 / 60, flat);
+    stepCarFixed(B, { throttle: 1 }, 1 / 60, flat);
+    const sBefore = Math.hypot(A.vx, A.vz);
+    const ev = resolveCarCollisions([A, B], {});
+    if (ev.length) {
+      hits += ev.length;
+      if (!firstBefore) { firstBefore = sBefore; firstAfter = Math.hypot(A.vx, A.vz); }
+    }
+    if (A.x > B.x) passed = true;
+  }
+  ok('정면 충돌이 감지된다', hits > 0, hits);
+  ok('차가 서로 통과하지 않는다', !passed && A.x < B.x, { ax: A.x.toFixed(2), bx: B.x.toFixed(2) });
+  ok('충돌 뒤 차체가 겹치지 않는다', bodyGap(A, B) > -0.05, bodyGap(A, B).toFixed(3));
+  ok('충돌 순간 반발로 속도가 줄어든다', firstAfter < firstBefore - 1, { before: firstBefore.toFixed(1), after: firstAfter.toFixed(1) });
+
+  // 추돌: 뒤차가 앞차를 밀면 앞차가 앞으로 나간다
+  const rear = createCar(CAR_SPECS.coupe, { x: 0, z: 0, h: Math.PI / 2 });
+  const front = createCar(CAR_SPECS.coupe, { x: 6, z: 0, h: Math.PI / 2 });
+  rear.vx = 32; rear.vz = 0; front.vx = 12; front.vz = 0;
+  const frontV0 = 12;
+  for (let f = 0; f < 90; f++) {
+    stepCarFixed(rear, { throttle: 1 }, 1 / 60, flat);
+    stepCarFixed(front, { throttle: 1 }, 1 / 60, flat);
+    resolveCarCollisions([rear, front], {});
+  }
+  ok('추돌로 앞차가 밀려 더 빨라진다', front.speed > frontV0 + 2, { before: frontV0, after: front.speed.toFixed(1) });
+  ok('추돌 후에도 서로 통과하지 않는다', rear.x < front.x && bodyGap(rear, front) > -0.05, { gap: bodyGap(rear, front).toFixed(3) });
+
+  // 측면 비비기: 나란히 붙어 달린다
+  const L = createCar(CAR_SPECS.gt, { x: 0, z: -0.7, h: Math.PI / 2 });
+  const R = createCar(CAR_SPECS.gt, { x: 3, z: 0.8, h: Math.PI / 2 });
+  L.vx = 26; L.vz = 0; R.vx = 26; R.vz = 0;
+  for (let f = 0; f < 60; f++) {
+    stepCarFixed(L, { throttle: 1 }, 1 / 60, flat);
+    stepCarFixed(R, { throttle: 1 }, 1 / 60, flat);
+    resolveCarCollisions([L, R], {});
+  }
+  ok('옆으로 비벼도 서로 뚫고 지나가지 않는다', bodyGap(L, R) > -0.05, bodyGap(L, R).toFixed(3));
+  ok('비비는 동안 앞으로 계속 달린다', L.speed > 20 && R.speed > 20, { L: L.speed.toFixed(1), R: R.speed.toFixed(1) });
+
+  // 네트워크로 위치를 받는 상대 차량은 고정, 내 차만 밀린다
+  const mine = createCar(CAR_SPECS.coupe, { x: 0, z: 0, h: Math.PI / 2 });
+  const remote = createCar(CAR_SPECS.coupe, { x: 2.4, z: 0, h: Math.PI / 2 });
+  remote.collisionInvMass = 0;
+  mine.vx = 20; mine.vz = 0; remote.vx = 20; remote.vz = 0;
+  const rx0 = remote.x;
+  resolveCarCollisions([mine, remote], {});
+  ok('네트워크 상대 차량은 밀리지 않는다', Math.abs(remote.x - rx0) < 1e-9, remote.x);
+  ok('내 차는 겹침에서 밀려난다', mine.x < 0, mine.x.toFixed(2));
+
+  // 밀려나도 가드레일 밖으로 나가지 않는다
+  const pressed = createCar(CAR_SPECS.coupe, { x: 0, z: 0, h: 0 });
+  const attacker = createCar(CAR_SPECS.coupe, { x: 0, z: 0, h: 0 });
+  const sPress = sample(TRACK, 40, 0);
+  pressed.x = sPress.x + sPress.nx * TRACK.wallLimit;
+  pressed.z = sPress.z + sPress.nz * TRACK.wallLimit;
+  pressed.h = sPress.heading; pressed._hint = Math.floor(40 / TRACK.segLen);
+  attacker.x = pressed.x - sPress.nx * 1.2; attacker.z = pressed.z - sPress.nz * 1.2;
+  attacker.h = sPress.heading; attacker._hint = pressed._hint;
+  const nearFn = (car) => { const q = nearest(TRACK, car.x, car.z, car._hint); car._hint = q.index; return q; };
+  resolveCarCollisions([pressed, attacker], { track: TRACK, nearestFor: nearFn });
+  const qp = nearest(TRACK, pressed.x, pressed.z, pressed._hint);
+  ok('밀려난 차가 도로 밖으로 나가지 않는다', Math.abs(qp.lateral) <= TRACK.wallLimit + 0.01, qp.lateral.toFixed(2));
+}
+
+/* ---------------------------------- 4. 랩/체크포인트 ---------------------------------- */
 section('체크포인트 · 랩 카운트');
 {
   const prog = new RaceProgress(TRACK, { laps: 3, s: TRACK.total - 10 });
@@ -313,8 +404,8 @@ section('체크포인트 · 랩 카운트');
   ok('시간 포맷(없음)', formatTime(null) === '--:--.--');
 }
 
-/* ---------------------------------- 4. AI 3랩 ---------------------------------- */
-section('AI 레이서 주행 (3랩 완주)');
+/* ---------------------------------- 5. AI 3랩 ---------------------------------- */
+section('AI 레이서 주행 (3랩 완주 · 서로 부딪히며)');
 {
   const N = 4;
   const keys = ['coupe', 'gt', 'hyper', 'coupe'];
@@ -329,22 +420,30 @@ section('AI 레이서 주행 (3랩 완주)');
   }
   const dt = 1 / 60;
   let t = 0;
+  let minGap = Infinity, packHits = 0;
+  const nearFns = new Map(racers.map((r) => [r.car, worldFor(r.car).nearest]));
   for (let f = 0; f < 60 * 240; f++) {
     t += dt;
     for (const r of racers) {
       if (r.car.finished) continue;
-      const w = worldFor(r.car);
-      const q = nearest(TRACK, r.car.x, r.car.z, r.car._hint);
-      r.car._hint = q.index;
-      r.prog.update(q.s, t);
+      const nearFn = nearFns.get(r.car);
+      const q = nearFn(r.car.x, r.car.z);
       const inp = aiInput(r.ai, r.car, q.s, t, TRACK);
-      stepCarFixed(r.car, inp, dt, w);
+      stepCarFixed(r.car, inp, dt, { track: TRACK, pads, nearest: nearFn });
       r.wall += r.car.wallHit;
       r.maxSpeed = Math.max(r.maxSpeed, r.car.speed);
-      const q2 = nearest(TRACK, r.car.x, r.car.z, r.car._hint);
-      r.car._hint = q2.index;
+      const q2 = nearFn(r.car.x, r.car.z);
       r.prog.update(q2.s, t);
       if (r.prog.finished) r.car.finished = true;
+    }
+    // 실제 레이스처럼 차량끼리 부딪히게 한다
+    const cars = racers.filter((r) => !r.car.finished).map((r) => r.car);
+    if (cars.length > 1) {
+      const hits = resolveCarCollisions(cars, { track: TRACK, nearestFor: (c) => nearFns.get(c)(c.x, c.z) });
+      packHits += hits.length;
+      for (let a = 0; a < cars.length; a++) {
+        for (let b = a + 1; b < cars.length; b++) minGap = Math.min(minGap, bodyGap(cars[a], cars[b]));
+      }
     }
     if (racers.every((r) => r.car.finished)) break;
   }
@@ -352,6 +451,8 @@ section('AI 레이서 주행 (3랩 완주)');
   const lapTimes = racers.map((r) => r.prog.lapTimes);
   ok('AI 랩타임 25~70초', lapTimes.every((ls) => ls.length === 3 && ls.every((x) => x > 25 && x < 70)), lapTimes.map((l) => l.map((x) => x.toFixed(1)).join('/')));
   ok('AI가 가드레일에 부딪히지 않음', racers.every((r) => r.wall < 1), racers.map((r) => r.wall.toFixed(1)));
+  ok('서로 부딪혀도 차체가 겹치지 않음', minGap > -0.05, minGap.toFixed(2));
+  console.log('    · AI 접촉: ' + packHits + '회, 최소 틈 ' + minGap.toFixed(2) + 'm');
   ok('AI 최고속이 물리 한계 이내', racers.every((r) => r.maxSpeed < 90), racers.map((r) => r.maxSpeed.toFixed(0)));
   const winner = racers.slice().sort((a, b) => a.prog.finishTime - b.prog.finishTime)[0];
   ok('AI 완주 시간 85~180초', winner.prog.finishTime > 85 && winner.prog.finishTime < 180, winner.prog.finishTime.toFixed(1));

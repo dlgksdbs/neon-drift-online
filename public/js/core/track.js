@@ -142,6 +142,7 @@ export function buildTrack(def = TRACK_DEF) {
   return {
     name: def.name || TRACK_DEF.name,
     halfWidth: def.halfWidth,
+    wallLimit: def.halfWidth - 0.65,   // 차체 중심이 갈 수 있는 한계(차폭 여유)
     n, total, segLen, xs, zs, tx, tz, nx, nz, heading, curvature, checkpoints,
     start: { x: xs[0], z: zs[0], heading: heading[0] },
     bounds: {
