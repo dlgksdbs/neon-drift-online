@@ -44,13 +44,7 @@ export function createScene(container) {
   magenta.position.set(150, 55, 190);
   scene.add(magenta);
 
-  const cyan = new THREE.DirectionalLight(0x35d8ff, 0.38);
-  cyan.position.set(120, 30, -230);
-  scene.add(cyan);
-
-  // 캐빈(차체)을 살짝 감싸는 낮은 앰비언트
-  const amb = new THREE.AmbientLight(0x2a2450, 0.38);
-  scene.add(amb);
+  // (조명 수를 줄여 셰이더 비용을 낮춘다 — 환경맵이 나머지를 채운다)
 
   function resize() {
     const w = container.clientWidth, h = container.clientHeight;
@@ -62,7 +56,7 @@ export function createScene(container) {
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', () => setTimeout(resize, 220));
 
-  return { renderer, scene, camera, resize, moon, hemi, env, magenta, cyan };
+  return { renderer, scene, camera, resize, moon, hemi, env, magenta };
 }
 
 /* ---------- 캔버스 텍스처 헬퍼 (기존 호출부 호환) ---------- */

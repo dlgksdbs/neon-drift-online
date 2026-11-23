@@ -48,7 +48,8 @@ export class Effects {
     sparkGeo.setAttribute('position', new THREE.BufferAttribute(this.sparkPos, 3));
     sparkGeo.setAttribute('color', new THREE.BufferAttribute(this.sparkCol, 3));
     this.sparkMat = new THREE.PointsMaterial({
-      size: 0.34, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false,
+      size: 0.38, map: glowTexture(), alphaTest: 0.02,
+      transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false,
       vertexColors: true, sizeAttenuation: true,
     });
     this.sparkPoints = new THREE.Points(sparkGeo, this.sparkMat);
