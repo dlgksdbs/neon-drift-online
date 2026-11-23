@@ -14,6 +14,7 @@ import { createCarMesh } from './game/carModel.js';
 import { Effects } from './game/effects.js';
 import { Hud } from './game/hud.js';
 import { SteeringWheel } from './game/wheel.js';
+import { Cockpit } from './game/cockpit.js';
 import { Net } from './net.js';
 
 const $ = (id) => document.getElementById(id);
@@ -56,6 +57,7 @@ const stage = $('stage');
 const view = createScene(stage);
 const trackMeshes = buildTrackMeshes(view.scene, TRACK, PADS);
 const effects = new Effects(view.scene);
+const cockpit = new Cockpit(view.scene, app.color);
 const hud = new Hud(TRACK);
 view.renderer.setAnimationLoop(null);
 
@@ -128,7 +130,14 @@ window.addEventListener('keydown', (e) => {
   if (k === 'c') toggleCamera();
   if (k === 'escape') { if (app.phase === 'racing') pauseRace(); else if (app.phase === 'paused') resumeRace(); }
 });
-window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+window.addEventListener('keyup', (e) => {
+  const k = e.key.toLowerCase();
+  keys.delete(k);
+  if (['a', 'd', 'arrowleft', 'arrowright'].includes(k)) {
+    const still = keys.has('a') || keys.has('d') || keys.has('arrowleft') || keys.has('arrowright');
+    if (!still) wheel.setVisual(0);
+  }
+});
 
 function readInput() {
   const left = input.left || keys.has('a') || keys.has('arrowleft');
@@ -198,6 +207,7 @@ function clearRacers() {
     view.scene.remove(r.mesh.group);
     r.mesh.group.traverse?.((o) => {
       if (o.geometry) o.geometry.dispose?.();
+      // 텍스처는 materials.js 캐시에서 공유하므로 지우지 않는다
       if (o.material) {
         if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose?.());
         else o.material.dispose?.();
@@ -259,7 +269,10 @@ function toggleCamera() {
   app.camMode = app.camMode === 'third' ? 'first' : 'third';
   hud.setCam(app.camMode);
   const me = app.racers.find((r) => r.isMe);
-  if (me) me.mesh.setVisible(app.camMode !== 'first');
+  if (me) me.mesh.setCamMode(app.camMode);
+  const gw = $('gaugeWrap');
+  if (gw) gw.classList.toggle('hidden', app.camMode === 'first');   // 1인칭은 계기판이 속도를 보여준다
+  app.camSnap = true;   // 시점 전환은 즉시 (러프 없이)
 }
 
 function updateCamera(dt) {
@@ -277,46 +290,59 @@ function updateCamera(dt) {
   const boost = Math.min(1.4, (car.boostTime > 0 ? 1 : 0) + (car.nitroActive ? 1 : 0));
   const yaw = car.h;
   const cam = view.camera;
+  const wantNear = camModeIsThird() ? 0.3 : 0.12;
+  if (cam.near !== wantNear) { cam.near = wantNear; cam.updateProjectionMatrix(); }
 
   if (camModeIsThird()) {
-    const back = 8.7 + speed * 0.06 + boost * 2.0;
-    const height = 3.8 + speed * 0.012 + boost * 0.3;
+    const back = 8.2 + speed * 0.055 + boost * 2.1;
+    const height = 3.25 + speed * 0.014 + boost * 0.32;
+    const drift = (car.steer || 0) * 0.55;
     const target = new THREE.Vector3(
-      car.x - Math.sin(yaw) * back,
+      car.x - Math.sin(yaw + drift * 0.12) * back,
       height,
-      car.z - Math.cos(yaw) * back
+      car.z - Math.cos(yaw + drift * 0.12) * back
     );
-    const k = 1 - Math.exp(-dt * 7.5);
+    const k = app.camSnap ? 1 : 1 - Math.exp(-dt * 8.0);
     camState.pos.lerp(target, k);
-    const lookTarget = new THREE.Vector3(car.x + Math.sin(car.h) * 10, 1.6, car.z + Math.cos(car.h) * 10);
-    camState.look.lerp(lookTarget, 1 - Math.exp(-dt * 9));
+    const lookTarget = new THREE.Vector3(car.x + Math.sin(car.h) * 11, 1.75, car.z + Math.cos(car.h) * 11);
+    camState.look.lerp(lookTarget, 1 - Math.exp(-dt * 10));
     cam.position.copy(camState.pos);
+    cam.up.set(0, 1, 0);
     cam.lookAt(camState.look);
-    camState.fov = THREE.MathUtils.lerp(camState.fov, 69 + speed * 0.26 + boost * 7, 1 - Math.exp(-dt * 4));
+    camState.fov = THREE.MathUtils.lerp(camState.fov, 68 + speed * 0.28 + boost * 8.5, 1 - Math.exp(-dt * 4));
+    // 코너링 시 살짝 기울이기
+    cam.rotateZ(-(car.steer || 0) * 0.035 * Math.min(1, speed / 30));
   } else {
+    const fx = Math.sin(car.h), fz = Math.cos(car.h);
+    const rx = Math.cos(car.h), rz = -Math.sin(car.h);
     const head = new THREE.Vector3(
-      car.x + Math.sin(car.h) * 1.1,
-      1.18,
-      car.z + Math.cos(car.h) * 1.1
+      car.x + fx * 0.62 + rx * -0.33,
+      1.195 + Math.sin(app.simTime * 13) * 0.0035 * Math.min(1, speed / 25),
+      car.z + fz * 0.62 + rz * -0.33
     );
-    camState.pos.lerp(head, 1 - Math.exp(-dt * 22));
+    camState.pos.lerp(head, app.camSnap ? 1 : 1 - Math.exp(-dt * 34));
     const lookTarget = new THREE.Vector3(
-      car.x + Math.sin(car.h) * 30,
-      1.3,
-      car.z + Math.cos(car.h) * 30
+      car.x + fx * 40 + rx * -0.10,
+      1.40 - (car.brake ? 0.06 : 0),
+      car.z + fz * 40 + rz * -0.10
     );
-    camState.look.lerp(lookTarget, 1 - Math.exp(-dt * 16));
+    camState.look.lerp(lookTarget, 1 - Math.exp(-dt * 20));
     cam.position.copy(camState.pos);
+    cam.up.set(0, 1, 0);
     cam.lookAt(camState.look);
-    camState.fov = THREE.MathUtils.lerp(camState.fov, 76 + speed * 0.2 + boost * 6, 1 - Math.exp(-dt * 4));
+    cam.rotateZ(-(car.steer || 0) * 0.055 * Math.min(1, speed / 28));
+    camState.fov = THREE.MathUtils.lerp(camState.fov, 68 + speed * 0.20 + boost * 6, 1 - Math.exp(-dt * 4));
   }
 
   // 충격/부스트 흔들림
-  if (camState.shake > 0.001) {
-    cam.position.x += (Math.random() - 0.5) * camState.shake;
-    cam.position.y += (Math.random() - 0.5) * camState.shake * 0.6;
+  const rumble = boost > 0.2 ? 0.014 * boost * Math.min(1, speed / 30) : 0;
+  const sh = camState.shake + rumble;
+  if (sh > 0.001) {
+    cam.position.x += (Math.random() - 0.5) * sh;
+    cam.position.y += (Math.random() - 0.5) * sh * 0.7;
     camState.shake *= Math.exp(-dt * 6);
   }
+  if (app.camSnap) { camState.fov = camModeIsThird() ? 68 : 68; app.camSnap = false; }
   if (cam.fov !== camState.fov) {
     cam.fov = camState.fov;
     cam.updateProjectionMatrix();
@@ -392,7 +418,7 @@ function updateRacers(dt) {
   for (const r of app.racers) {
     if (frozen && !r.isRemote) {
       // 카운트다운: 제자리 대기 (살짝 떨림만)
-      r.mesh.update(r.car, dt, app.simTime, app.camMode);
+      r.mesh.update(r.car, dt, app.simTime, r.isMe ? app.camMode : 'third');
       continue;
     }
     if (r.isRemote) { updateRemote(r, dt); continue; }
@@ -431,17 +457,44 @@ function updateRacers(dt) {
       effects.spawnSpark(r.car.x - Math.sin(r.car.h) * 1.6, 0.4, r.car.z - Math.cos(r.car.h) * 1.6, 1, 0x7ef9ff, 7, 3);
     }
 
-    r.mesh.update(r.car, dt, app.simTime, app.camMode);
+    // ---- 배기 애프터버너 파티클 (니트로/부스터)
+    const boosting = r.car.boostTime > 0 || r.car.nitroActive;
+    if (boosting) {
+      const sh = r.mesh.shape;
+      const fx = Math.sin(r.car.h), fz = Math.cos(r.car.h);
+      const rx = Math.cos(r.car.h), rz = -Math.sin(r.car.h);
+      const bx = r.car.x - fx * (sh.L / 2 + 0.25);
+      const bz = r.car.z - fz * (sh.L / 2 + 0.25);
+      r.sparkAcc += dt * (r.car.nitroActive ? 60 : 34);
+      while (r.sparkAcc > 1) {
+        r.sparkAcc -= 1;
+        const side = Math.random() < 0.5 ? -1 : 1;
+        effects.spawnExhaust(
+          bx + rx * side * sh.W * 0.17,
+          sh.sill + 0.22,
+          bz + rz * side * sh.W * 0.17,
+          -fx, -fz,
+          r.car.nitroActive ? 0x8ff6ff : 0xffc46a,
+          r.car.nitroActive ? 1.0 : 0.7
+        );
+      }
+    } else {
+      r.sparkAcc = 0;
+    }
+    // 니트로 진입 순간 타격감
+    if (r.car.nitroActive && !r.wasNitro) {
+      if (r.isMe) {
+        camState.shake = Math.min(0.4, camState.shake + 0.16);
+        hud.flash('rgba(120,240,255,.5)');
+      }
+    }
+    r.wasNitro = r.car.nitroActive;
+
+    r.mesh.update(r.car, dt, app.simTime, r.isMe ? app.camMode : 'third');
   }
 
   // ---- 순위
-  const list = app.racers.map((r) => ({
-    ref: r, id: r.id, progressValue: r.prog.progressValue,
-    finished: r.prog.finished, finishTime: r.prog.finishTime,
-  }));
-  const ranked = rankRacers(list);
-  ranked.forEach((r, i) => { r.position = i + 1; });
-  app.ranked = ranked;
+  const ranked = recomputeRanks();
 
   if (me) {
     if (me.prog.finished && !app.resultsShown && app.phase === 'racing') {
@@ -454,9 +507,22 @@ function updateRacers(dt) {
 }
 
 let hudTick = 0;
+function recomputeRanks() {
+  const list = app.racers.map((r) => ({
+    ref: r, id: r.id, progressValue: r.prog.progressValue,
+    finished: r.prog.finished, finishTime: r.prog.finishTime,
+  }));
+  const ranked = rankRacers(list);
+  ranked.forEach((r, i) => { r.position = i + 1; });
+  app.ranked = ranked;
+  return ranked;
+}
+
 function boardRows() {
-  const ranked = app.ranked && app.ranked.length ? app.ranked : app.racers.map((r, i) => ({ ref: r, position: i + 1 }));
-  return ranked.map((r, i) => {
+  const ranked = app.racers.length ? recomputeRanks() : [];
+  // 순위가 바뀌면 상단 표시도 즉시 맞춘다
+  const myRow = ranked.find((r) => r.ref && r.ref.isMe);
+  const rows = ranked.map((r, i) => {
     const racer = r.ref || r;
     const prog = racer.prog;
     const done = prog && prog.finished;
@@ -469,6 +535,8 @@ function boardRows() {
       lapText: done ? '완주' : `${Math.min(LAPS, prog.lap + 1)}/${LAPS}`,
     };
   });
+  if (myRow) hud.setPos(myRow.position || 1, app.racers.length);
+  return rows;
 }
 
 function updateHud(dt) {
@@ -511,7 +579,7 @@ function updateRemote(r, dt) {
     boostTime: a.boost ? 0.4 : 0, nitroActive: false,
   };
   r.car.x = x; r.car.z = z; r.car.h = h; r.car.speed = speed;
-  r.mesh.update(fake, dt, app.simTime, app.camMode);
+  r.mesh.update(fake, dt, app.simTime, 'third');
 }
 
 /* ----------------------------- 네트워크 ----------------------------- */
@@ -812,6 +880,7 @@ function buildMenu() {
     sw.dataset.color = c;
     sw.addEventListener('click', () => {
       app.color = c;
+      cockpit.setColor(c);
       localStorage.setItem('neon_color', c);
       colors.querySelectorAll('.swatch').forEach((s) => s.classList.toggle('sel', s.dataset.color === c));
       updateMenuPreview();
@@ -931,6 +1000,17 @@ function frame(now) {
       }
     }
     updateCamera(dt);
+    {
+      const me = app.racers.find((r) => r.isMe);
+      if (me) {
+        cockpit.update(view.camera, dt, {
+          on: app.camMode === 'first' && app.phase === 'racing',
+          steer: input.steer,
+          boost: me.car.nitroActive ? 1.2 : (me.car.boostTime > 0 ? 0.7 : 0),
+        });
+        me.mesh.setVisible(app.camMode !== 'first' && app.phase !== 'menu');
+      }
+    }
     trackMeshes.update(dt, now / 1000, app.racers.find((r) => r.isMe)?.prog.nextCp ?? 0);
     effects.update(dt, TRACK);
     updateHud(dt);
@@ -1047,6 +1127,7 @@ function boot() {
     startSolo,
     errors: app.errors,
     renderer: view.renderer,
+    camera: view.camera,
   };
 }
 

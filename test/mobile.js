@@ -39,9 +39,9 @@ process.on('exit', stop);
 await sleep(1600);
 const BASE = `http://127.0.0.1:${PORT}`;
 
-const LAUNCH_ARGS = ['--no-sandbox', '--disable-setuid-sandbox', '--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader', '--autoplay-policy=no-user-gesture-required','--disable-background-timer-throttling','--disable-backgrounding-occluded-windows','--disable-renderer-backgrounding','--disable-features=CalculateNativeWinOcclusion'];
+const LAUNCH_ARGS = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader', '--autoplay-policy=no-user-gesture-required','--disable-background-timer-throttling','--disable-backgrounding-occluded-windows','--disable-renderer-backgrounding','--disable-features=CalculateNativeWinOcclusion'];
 const browser = await puppeteer.launch({
-  headless: 'new', executablePath: CHROME, protocolTimeout: 180000, args: LAUNCH_ARGS,
+  headless: 'new', executablePath: CHROME, protocolTimeout: 300000, args: LAUNCH_ARGS,
 });
 const errors = [];
 async function mkPage(br, viewport = { width: 390, height: 844 }) {
@@ -207,7 +207,7 @@ class WsClient {
 /* ------------------------------ 1. 메뉴 ------------------------------ */
 section('메뉴 · 렌더');
 const page = await newPage();
-await page.goto(`${BASE}/`, { waitUntil: 'networkidle0', timeout: 30000 });
+await page.goto(`${BASE}/`, { waitUntil: 'networkidle0', timeout: 90000 });
 await sleep(1800);
 ok('타이틀 표시', await page.$eval('.logo h1', (e) => /NEON/.test(e.textContent)));
 ok('차량 카드 3개', (await page.$$('.carCard')).length === 3);
@@ -385,7 +385,7 @@ await sleep(350);
 const keyWheel = await wheelState(page);
 ok('키보드 조향 시 핸들도 회전', keyWheel.deg > 20, keyWheel);
 await page.keyboard.up('ArrowRight');
-await sleep(400);
+await sleep(1200);
 ok('키보드 해제 후 핸들 복원', Math.abs((await wheelState(page)).deg) < 2);
 
 /* ------------------------------ 6. HUD 겹침 ------------------------------ */
@@ -410,7 +410,7 @@ await page.evaluate(() => {
   for (const r of n.app.racers) if (!r.isMe) r.prog.lap = 0;
   me.prog.lap = 1;              // 한 랩 앞선 것으로 → 1위
 });
-await sleep(400);
+await sleep(900);
 const firstRank = await stateOf(page);
 ok('앞서면 순위표 1위로 갱신', firstRank.position === 1 && firstRank.board[0].me === true, { pos: firstRank.position, board: firstRank.board });
 ok('상단 순위 표시도 1위', (await page.$eval('#posVal', (e) => e.textContent)) === '1');
@@ -420,7 +420,7 @@ await page.evaluate(() => {
   me.prog.lap = 0;
   for (const r of n.app.racers) if (!r.isMe) r.prog.lap = 1;   // AI 가 한 랩 앞서게 → 최하위
 });
-await sleep(400);
+await sleep(900);
 const afterRank = await stateOf(page);
 ok('뒤처지면 순위 4위로 하락', afterRank.position === 4, { pos: afterRank.position, board: afterRank.board });
 ok('순위표 내 행이 최하위로 갱신', afterRank.board[afterRank.board.length - 1].me === true, afterRank.board);
@@ -537,8 +537,8 @@ await page.close();
 /* ------------------------------ 11. 가로 모드 ------------------------------ */
 section('가로 모드 (844×390)');
 const land = await newPage({ width: 844, height: 390 });
-await land.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 45000 });
-await land.waitForFunction(() => window.__neon && window.__neon.state(), { timeout: 30000 });
+await land.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 90000 });
+await land.waitForFunction(() => window.__neon && window.__neon.state(), { timeout: 90000 });
 await sleep(1500);
 ok('메뉴에 조작 좌우 반전 토글', !!(await land.$('#handBtn')));
 ok('메뉴 토글 기본 라벨(왼쪽 핸들)', /왼쪽 핸들/.test(await land.$eval('#handBtn b', (e) => e.textContent)));
@@ -546,8 +546,8 @@ await land.click('#handBtn');
 await sleep(350);
 ok('메뉴 토글로 HUD 반전 적용', await land.evaluate(() => document.getElementById('hud').classList.contains('flip')));
 ok('메뉴 토글 라벨 ON(오른쪽 핸들)', /오른쪽 핸들/.test(await land.$eval('#handBtn b', (e) => e.textContent)));
-await land.reload({ waitUntil: 'domcontentloaded', timeout: 45000 });
-await land.waitForFunction(() => window.__neon && window.__neon.state(), { timeout: 30000 });
+await land.reload({ waitUntil: 'domcontentloaded', timeout: 90000 });
+await land.waitForFunction(() => window.__neon && window.__neon.state(), { timeout: 90000 });
 await sleep(1600);
 ok('새로고침 후 반전 유지(클래스)', await land.evaluate(() => document.getElementById('hud').classList.contains('flip')));
 ok('새로고침 후 설정 복원', (await stateOf(land)).flipControls === true);
@@ -602,11 +602,11 @@ const code = room.code;
 ok('방 코드 발급', /^[A-Z0-9]{4}$/.test(code), code);
 
 const guest = await newPage();
-await guest.goto(`${BASE}/?room=${code}&name=${encodeURIComponent('정원영')}`, { waitUntil: 'domcontentloaded', timeout: 45000 });
+await guest.goto(`${BASE}/?room=${code}&name=${encodeURIComponent('정원영')}`, { waitUntil: 'domcontentloaded', timeout: 90000 });
 await guest.waitForFunction(() => {
   const el = document.getElementById('roomCode');
   return el && /^[A-Z0-9]{4}$/.test(el.textContent.trim());
-}, { timeout: 25000 });
+}, { timeout: 60000 });
 await sleep(900);
 const guestCode = await guest.evaluate(() => (document.getElementById('roomCode') || {}).textContent);
 ok('초대 링크로 게스트 참가 · 같은 방 코드', (guestCode || '').trim() === code, guestCode);

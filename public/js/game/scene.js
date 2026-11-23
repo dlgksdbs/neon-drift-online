@@ -1,7 +1,8 @@
 import * as THREE from 'three';
+import { makeEnvironment, skyTexture } from './materials.js';
 
 /* =============================================================================
-   scene.js — 렌더러 · 밤하늘 · 네온 스카이라인 · 조명
+   scene.js — 렌더러 · 환경맵 · 밤하늘 · 네온 조명
    ============================================================================= */
 
 export function createScene(container) {
@@ -9,72 +10,47 @@ export function createScene(container) {
     antialias: true,
     powerPreference: 'high-performance',
     alpha: false,
+    stencil: false,
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.15;
+  renderer.toneMappingExposure = 0.98;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   container.appendChild(renderer.domElement);
   renderer.domElement.id = 'gl';
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x05030e);
-  scene.fog = new THREE.FogExp2(0x120a2c, 0.0026);
-
-  const camera = new THREE.PerspectiveCamera(68, container.clientWidth / container.clientHeight, 0.3, 1800);
-
-  // --- 조명 (저비용)
-  const hemi = new THREE.HemisphereLight(0x6f7dff, 0x160a24, 1.25);
-  scene.add(hemi);
-  const moon = new THREE.DirectionalLight(0xa9c6ff, 1.15);
-  moon.position.set(-120, 180, -80);
-  scene.add(moon);
-  const fill = new THREE.DirectionalLight(0xff3bd1, 0.3);
-  fill.position.set(140, 60, 160);
-  scene.add(fill);
-
-  // --- 하늘 그라디언트
-  const skyGeo = new THREE.SphereGeometry(900, 24, 16);
-  const skyMat = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    depthWrite: false,
-    fog: false,
-    uniforms: {
-      top: { value: new THREE.Color(0x02000a) },
-      mid: { value: new THREE.Color(0x140a3a) },
-      bottom: { value: new THREE.Color(0x3a0f52) },
-    },
-    vertexShader: `varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-    fragmentShader: `
-      uniform vec3 top; uniform vec3 mid; uniform vec3 bottom; varying vec3 vP;
-      void main(){
-        float h = normalize(vP).y;
-        vec3 c = mix(bottom, mid, smoothstep(-0.15, 0.22, h));
-        c = mix(c, top, smoothstep(0.15, 0.75, h));
-        gl_FragColor = vec4(c, 1.0);
-      }`,
-  });
-  const sky = new THREE.Mesh(skyGeo, skyMat);
-  scene.add(sky);
-
-  // --- 별
-  const starCount = 420;
-  const starPos = new Float32Array(starCount * 3);
-  for (let i = 0; i < starCount; i++) {
-    const a = Math.random() * Math.PI * 2;
-    const r = 620 + Math.random() * 180;
-    const y = 80 + Math.random() * 420;
-    starPos[i * 3] = Math.cos(a) * r;
-    starPos[i * 3 + 1] = y;
-    starPos[i * 3 + 2] = Math.sin(a) * r;
+  scene.background = skyTexture();
+  scene.backgroundIntensity = 0.92;
+  scene.fog = new THREE.FogExp2(0x0d0922, 0.0021);
+  const env = makeEnvironment(renderer);
+  if (env) {
+    scene.environment = env;
+    scene.environmentIntensity = 0.70;
   }
-  const starGeo = new THREE.BufferGeometry();
-  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({
-    color: 0xbfd8ff, size: 2.2, sizeAttenuation: true, transparent: true, opacity: 0.85, fog: false, depthWrite: false,
-  }));
-  scene.add(stars);
+
+  const camera = new THREE.PerspectiveCamera(68, container.clientWidth / container.clientHeight, 0.3, 2600);
+
+  // --- 조명 (환경맵 + 방향광 3개로 네온 야경의 색 분리)
+  const hemi = new THREE.HemisphereLight(0x6f7dff, 0x1a0a28, 0.70);
+  scene.add(hemi);
+
+  const moon = new THREE.DirectionalLight(0xbfd4ff, 1.30);
+  moon.position.set(-140, 190, -110);
+  scene.add(moon);
+
+  const magenta = new THREE.DirectionalLight(0xff3bd1, 0.30);
+  magenta.position.set(150, 55, 190);
+  scene.add(magenta);
+
+  const cyan = new THREE.DirectionalLight(0x35d8ff, 0.38);
+  cyan.position.set(120, 30, -230);
+  scene.add(cyan);
+
+  // 캐빈(차체)을 살짝 감싸는 낮은 앰비언트
+  const amb = new THREE.AmbientLight(0x2a2450, 0.38);
+  scene.add(amb);
 
   function resize() {
     const w = container.clientWidth, h = container.clientHeight;
@@ -86,10 +62,10 @@ export function createScene(container) {
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', () => setTimeout(resize, 220));
 
-  return { renderer, scene, camera, resize, moon, hemi };
+  return { renderer, scene, camera, resize, moon, hemi, env, magenta, cyan };
 }
 
-/* ---------- 캔버스 텍스처 헬퍼 ---------- */
+/* ---------- 캔버스 텍스처 헬퍼 (기존 호출부 호환) ---------- */
 export function canvasTexture(w, h, draw, opts = {}) {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;

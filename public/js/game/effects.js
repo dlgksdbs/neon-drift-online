@@ -1,12 +1,14 @@
 import * as THREE from 'three';
+import { glowTexture } from './materials.js';
 
 /* =============================================================================
-   effects.js — 스키드마크(네온) · 스파크 파티클 · 부스터 충격파 링
+   effects.js — 스키드마크(네온) · 스파크 · 부스터 링 · 배기 애프터버너 파티클
    ============================================================================= */
 
 const MAX_SKID = 1100;
 const MAX_SPARK = 480;
 const MAX_RING = 6;
+const MAX_EXHAUST = 300;
 
 export class Effects {
   constructor(scene) {
@@ -83,6 +85,46 @@ export class Effects {
       this.rings.push(ring);
     }
     this.ringIdx = 0;
+
+    // ---- 배기 애프터버너 (니트로 불꽃)
+    this.exPos = new Float32Array(MAX_EXHAUST * 3);
+    this.exVel = new Float32Array(MAX_EXHAUST * 3);
+    this.exLife = new Float32Array(MAX_EXHAUST);
+    this.exMax = new Float32Array(MAX_EXHAUST);
+    this.exCol = new Float32Array(MAX_EXHAUST * 3);
+    this.exBase = new Float32Array(MAX_EXHAUST * 3);
+    for (let i = 0; i < MAX_EXHAUST; i++) this.exPos[i * 3 + 1] = -1000;
+    const exGeo = new THREE.BufferGeometry();
+    exGeo.setAttribute('position', new THREE.BufferAttribute(this.exPos, 3));
+    exGeo.setAttribute('color', new THREE.BufferAttribute(this.exCol, 3));
+    this.exMat = new THREE.PointsMaterial({
+      map: glowTexture(), size: 0.55, transparent: true, opacity: 0.9, alphaTest: 0.04,
+      blending: THREE.AdditiveBlending, depthWrite: false, vertexColors: true, sizeAttenuation: true,
+    });
+    this.exPoints = new THREE.Points(exGeo, this.exMat);
+    this.exPoints.frustumCulled = false;
+    this.scene.add(this.exPoints);
+    this.exIdx = 0;
+  }
+
+  /* 배기 불꽃: 뒤쪽으로 빠르게 뿜어져 나가며 식는다 */
+  spawnExhaust(x, y, z, dx, dz, color = 0x8ff6ff, power = 1) {
+    const i = this.exIdx++ % MAX_EXHAUST;
+    const c = new THREE.Color(color);
+    this.exPos[i * 3] = x + (Math.random() - 0.5) * 0.12;
+    this.exPos[i * 3 + 1] = y + (Math.random() - 0.5) * 0.10;
+    this.exPos[i * 3 + 2] = z + (Math.random() - 0.5) * 0.12;
+    const back = 5 + Math.random() * 7 * power;
+    this.exVel[i * 3] = dx * back + (Math.random() - 0.5) * 2.4;
+    this.exVel[i * 3 + 1] = (Math.random() - 0.15) * 1.7;
+    this.exVel[i * 3 + 2] = dz * back + (Math.random() - 0.5) * 2.4;
+    const life = 0.22 + Math.random() * 0.30;
+    this.exLife[i] = life;
+    this.exMax[i] = life;
+    this.exBase[i * 3] = c.r; this.exBase[i * 3 + 1] = c.g; this.exBase[i * 3 + 2] = c.b;
+    this.exCol[i * 3] = c.r; this.exCol[i * 3 + 1] = c.g; this.exCol[i * 3 + 2] = c.b;
+    this.exPoints.geometry.attributes.position.needsUpdate = true;
+    this.exPoints.geometry.attributes.color.needsUpdate = true;
   }
 
   /* 네온 스키드마크: 월드 위치 + 진행방향 + 색 */
@@ -179,6 +221,30 @@ export class Effects {
       ring.material.opacity = Math.max(0, 0.8 * (1 - k));
       if (ring.userData.life <= 0) ring.visible = false;
     }
+
+    // 배기 불꽃
+    let exDirty = false;
+    for (let i = 0; i < MAX_EXHAUST; i++) {
+      if (this.exLife[i] <= 0) continue;
+      this.exLife[i] -= dt;
+      const k = Math.max(0, this.exLife[i] / this.exMax[i]);
+      this.exPos[i * 3] += this.exVel[i * 3] * dt;
+      this.exPos[i * 3 + 1] += this.exVel[i * 3 + 1] * dt;
+      this.exPos[i * 3 + 2] += this.exVel[i * 3 + 2] * dt;
+      this.exVel[i * 3] *= 0.93;
+      this.exVel[i * 3 + 2] *= 0.93;
+      this.exVel[i * 3 + 1] = this.exVel[i * 3 + 1] * 0.94 + 0.6 * dt;
+      const f = k * k;
+      this.exCol[i * 3] = this.exBase[i * 3] * f;
+      this.exCol[i * 3 + 1] = this.exBase[i * 3 + 1] * f;
+      this.exCol[i * 3 + 2] = this.exBase[i * 3 + 2] * f;
+      if (this.exLife[i] <= 0) this.exPos[i * 3 + 1] = -1000;
+      exDirty = true;
+    }
+    if (exDirty) {
+      this.exPoints.geometry.attributes.position.needsUpdate = true;
+      this.exPoints.geometry.attributes.color.needsUpdate = true;
+    }
   }
 
   clear() {
@@ -190,5 +256,7 @@ export class Effects {
     for (let i = 0; i < MAX_SPARK; i++) { this.sparkLife[i] = 0; this.sparkPos[i * 3 + 1] = -1000; }
     this.sparkPoints.geometry.attributes.position.needsUpdate = true;
     for (const r of this.rings) r.visible = false;
+    for (let i = 0; i < MAX_EXHAUST; i++) { this.exLife[i] = 0; this.exPos[i * 3 + 1] = -1000; }
+    this.exPoints.geometry.attributes.position.needsUpdate = true;
   }
 }

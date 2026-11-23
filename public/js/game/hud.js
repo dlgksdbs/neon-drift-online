@@ -74,8 +74,16 @@ export class Hud {
     this.el.lapTime.textContent = formatTime(t);
     this.el.best.textContent = 'BEST ' + formatTime(best);
   }
-  setSpeed(k) { this.el.speed.textContent = String(Math.round(k)); }
-  setNitro(fuel) { this.el.nitroFill.style.width = `${Math.max(0, Math.min(100, fuel))}%`; }
+  setSpeed(k) {
+    this.el.speed.textContent = String(Math.round(k));
+    const t = Math.max(0, Math.min(1, k / 230));
+    this.el.speed.style.textShadow = `0 0 ${16 + t * 26}px rgba(${34 + t * 140}, ${230 - t * 40}, 255, ${0.7 + t * 0.3}), 0 2px 6px rgba(0,0,0,.8)`;
+    this.el.speed.style.transform = `scale(${1 + t * 0.07})`;
+  }
+  setNitro(fuel) {
+    this.el.nitroFill.style.width = `${Math.max(0, Math.min(100, fuel))}%`;
+    this.el.nitroFill.classList.toggle('low', fuel < 22);
+  }
   setCam(mode) { this.el.camMode.textContent = mode === 'first' ? '1인칭' : '3인칭'; }
 
   /* 실시간 순위표: rows = [{rank, name, color, me, lapText, done}] (위가 1위) */
@@ -106,7 +114,8 @@ export class Hud {
 
   setBoostVisual(level) {
     const o = Math.max(0, Math.min(1, level));
-    this.el.speedlines.style.opacity = String(o * 0.55);
+    this.el.speedlines.style.opacity = String(o * 0.62);
+    this.el.hud.classList.toggle('boost', o > 0.45);
   }
 
   flash(color = 'rgba(120,220,255,.55)') {
