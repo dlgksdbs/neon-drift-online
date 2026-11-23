@@ -816,14 +816,16 @@ export function createCarMesh(specKey, neonColor = '#37f3ff', opts = {}) {
 
     const pitchTarget = THREE.MathUtils.clamp(-accel * 0.0022, -0.05, 0.05);
     state.pitch = THREE.MathUtils.lerp(state.pitch, pitchTarget, Math.min(1, dt * 6));
-    const rollTarget = THREE.MathUtils.clamp((car.steer || 0) * 0.09 * Math.min(1, speed / 32), -0.11, 0.11);
+    // +steer = 화면 오른쪽 → 차체는 코너 바깥쪽으로 기운다(local z 음회전)
+    const rollTarget = THREE.MathUtils.clamp(-(car.steer || 0) * 0.09 * Math.min(1, speed / 32), -0.11, 0.11);
     state.roll = THREE.MathUtils.lerp(state.roll, rollTarget, Math.min(1, dt * 7));
     tilt.rotation.x = state.pitch;
     tilt.rotation.z = state.roll;
     const bob = Math.sin((t || 0) * 9 + car.x * 0.1) * 0.004 * Math.min(1, speed / 20);
     tilt.position.y = bob;
 
-    const steer = (car.steer || 0) * 0.50;
+    // 앞바퀴도 차가 꺾는 쪽(화면 오른쪽)을 본다
+    const steer = -(car.steer || 0) * 0.50;
     for (let i = 0; i < 4; i++) {
       const slot = wheelSlots[i];
       spinArr[i] += (car.speed || 0) * dt / Math.max(0.1, m.wheelR);

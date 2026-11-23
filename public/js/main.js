@@ -296,7 +296,7 @@ function updateCamera(dt) {
   if (camModeIsThird()) {
     const back = 8.2 + speed * 0.055 + boost * 2.1;
     const height = 3.25 + speed * 0.014 + boost * 0.32;
-    const drift = (car.steer || 0) * 0.55;
+    const drift = -(car.steer || 0) * 0.55;
     const target = new THREE.Vector3(
       car.x - Math.sin(yaw + drift * 0.12) * back,
       height,
@@ -311,7 +311,7 @@ function updateCamera(dt) {
     cam.lookAt(camState.look);
     camState.fov = THREE.MathUtils.lerp(camState.fov, 68 + speed * 0.28 + boost * 8.5, 1 - Math.exp(-dt * 4));
     // 코너링 시 살짝 기울이기
-    cam.rotateZ(-(car.steer || 0) * 0.035 * Math.min(1, speed / 30));
+    cam.rotateZ((car.steer || 0) * 0.035 * Math.min(1, speed / 30));
   } else {
     const fx = Math.sin(car.h), fz = Math.cos(car.h);
     const rx = Math.cos(car.h), rz = -Math.sin(car.h);
@@ -330,7 +330,7 @@ function updateCamera(dt) {
     cam.position.copy(camState.pos);
     cam.up.set(0, 1, 0);
     cam.lookAt(camState.look);
-    cam.rotateZ(-(car.steer || 0) * 0.055 * Math.min(1, speed / 28));
+    cam.rotateZ((car.steer || 0) * 0.055 * Math.min(1, speed / 28));
     camState.fov = THREE.MathUtils.lerp(camState.fov, 68 + speed * 0.20 + boost * 6, 1 - Math.exp(-dt * 4));
   }
 

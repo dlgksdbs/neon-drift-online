@@ -103,12 +103,12 @@ section('차량 물리 · 가속/조향/제동');
   for (let i = 0; i < 30; i++) stepCarFixed(still, { steer: 1 }, 1 / 60, w);
   ok('정지 상태 조향 시 방향 유지', Math.abs(still.h) < 0.02, still.h);
 
-  // 주행 중 조향
+  // 주행 중 조향 (조향 규약: +steer = 화면 오른쪽 = heading 감소)
   const turner = createCar(CAR_SPECS.coupe, { x: 0, z: 0, h: 0 });
   for (let i = 0; i < 90; i++) stepCarFixed(turner, { throttle: 1 }, 1 / 60, w);
   const h0 = turner.h;
   for (let i = 0; i < 45; i++) stepCarFixed(turner, { throttle: 1, steer: 1 }, 1 / 60, w);
-  ok('주행 중 우조향으로 방향 전환', turner.h - h0 > 0.25, (turner.h - h0).toFixed(2));
+  ok('주행 중 우조향(화면 오른쪽)으로 방향 전환', turner.h - h0 < -0.25, (turner.h - h0).toFixed(2));
 }
 
 section('핸들 조향 · 즉시 회전 · 무슬립');
@@ -125,15 +125,15 @@ section('핸들 조향 · 즉시 회전 · 무슬립');
   const frame0 = car.h;
   stepCar(car, { throttle: 1, steer: 1 }, 1 / 120, w);
   const oneFrame = car.h - frame0;
-  ok('핸들 입력 1프레임(1/120s)에 즉시 회전', oneFrame > 0.02, oneFrame.toFixed(4));
-  ok('한 프레임 회전량이 과하지 않음(<0.08rad)', oneFrame < 0.08, oneFrame.toFixed(4));
+  ok('핸들 입력 1프레임(1/120s)에 즉시 회전', oneFrame < -0.02, oneFrame.toFixed(4));
+  ok('한 프레임 회전량이 과하지 않음(<0.08rad)', Math.abs(oneFrame) < 0.08, oneFrame.toFixed(4));
 
   // 0.1초 만에 눈에 띄게 꺾인다
   const car2 = cruise();
   const h1 = car2.h;
   for (let i = 0; i < 12; i++) stepCarFixed(car2, { throttle: 1, steer: 1 }, 1 / 120, w);
   const dh100 = car2.h - h1;
-  ok('0.1초 조향으로 0.2rad 이상 회전', dh100 > 0.2, dh100.toFixed(3));
+  ok('0.1초 조향으로 0.2rad 이상 회전', dh100 < -0.2, dh100.toFixed(3));
   ok('조향 중 횡슬립 각이 거의 없음(<0.02rad)', car2.slip < 0.02, car2.slip.toFixed(4));
 
   // 핸들 각도에 비례: 절반 조향 = 절반 회전
@@ -150,7 +150,7 @@ section('핸들 조향 · 즉시 회전 · 무슬립');
   const left = cruise();
   const hl = left.h;
   for (let i = 0; i < 20; i++) stepCarFixed(left, { throttle: 1, steer: -1 }, 1 / 120, w);
-  ok('핸들 왼쪽 회전 시 반대 방향', left.h - hl < -0.2, (left.h - hl).toFixed(3));
+  ok('핸들 왼쪽 회전 시 반대 방향', left.h - hl > 0.2, (left.h - hl).toFixed(3));
 
   // 핸들을 놓으면(steer 0) 직진 유지
   const straight = cruise();
@@ -159,6 +159,19 @@ section('핸들 조향 · 즉시 회전 · 무슬립');
   for (let i = 0; i < 120; i++) stepCarFixed(straight, { throttle: 1, steer: 0 }, 1 / 120, w);
   ok('핸들을 놓으면 그 방향으로 직진', Math.abs(straight.h - hs) < 0.01, (straight.h - hs).toFixed(4));
   ok('직진 유지 중 슬립 없음', straight.slip < 0.01, straight.slip.toFixed(4));
+
+  // 화면 기준 확인: 카메라가 전방을 보므로 트랙 법선 n(+lateral)이 화면 왼쪽이다.
+  // 핸들을 시계방향(+)으로 돌리면 차는 화면 오른쪽 = lateral 이 줄어드는 쪽으로 가야 한다.
+  const side = createCar(CAR_SPECS.coupe, { x: 0, z: 0, h: 0 });
+  const sp = sample(TRACK, 30, 0);
+  side.x = sp.x; side.z = sp.z; side.h = sp.heading;
+  side.vx = Math.sin(sp.heading) * 26; side.vz = Math.cos(sp.heading) * 26;
+  side._hint = Math.floor(30 / TRACK.segLen) % TRACK.n;
+  const wSide = worldFor(side);
+  const lat0 = nearest(TRACK, side.x, side.z, side._hint).lateral;
+  for (let i = 0; i < 30; i++) stepCarFixed(side, { throttle: 1, steer: 1 }, 1 / 60, wSide);
+  const lat1 = nearest(TRACK, side.x, side.z, side._hint).lateral;
+  ok('시계방향(오른쪽) 조향 → 화면 오른쪽으로 붙는다', lat1 - lat0 < -0.2, (lat1 - lat0).toFixed(2));
 
   // 고속 코너에서도 벽에 박지 않는다 (풀 스로틀 + 레이싱 라인 추종)
   const runner = createCar(CAR_SPECS.coupe, { x: 0, z: 0, h: 0 });
@@ -175,7 +188,7 @@ section('핸들 조향 · 즉시 회전 · 무슬립');
     let err = Math.atan2(target.x - runner.x, target.z - runner.z) - runner.h;
     while (err > Math.PI) err -= Math.PI * 2;
     while (err < -Math.PI) err += Math.PI * 2;
-    const steer = Math.max(-1, Math.min(1, err * 1.8));
+    const steer = Math.max(-1, Math.min(1, -err * 1.8));
     stepCarFixed(runner, { throttle: 1, steer }, 1 / 60, trackWorld);
     const q2 = nearest(TRACK, runner.x, runner.z, runner._hint); runner._hint = q2.index;
     const ds = Math.abs(q2.s - prevS); prevS = q2.s;

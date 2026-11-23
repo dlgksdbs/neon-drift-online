@@ -77,7 +77,9 @@ export function aiInput(ai, car, s, t, track) {
   const px = track.xs[i] + nx * off, pz = track.zs[i] + nz * off;
   const desired = Math.atan2(px - car.x, pz - car.z);
   const err = wrapAngle(desired - car.h);
-  let steer = Math.max(-1, Math.min(1, err * 1.7));
+  // 조향 규약은 물리와 같다: +steer = 화면 오른쪽 = heading 감소.
+  // err>0 이면 목표 heading 이 더 크므로(=화면 왼쪽) 왼쪽으로 꺾어야 한다 → 부호 반전.
+  let steer = Math.max(-1, Math.min(1, -err * 1.7));
 
   // 코너 속도 계획
   const ahead = minRadiusAhead(track, s, 70);

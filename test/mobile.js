@@ -147,6 +147,8 @@ async function controlLayout(p) {
 }
 const isMirrored = (a, b, vw) => Math.abs(a.x - (vw - b.right)) < 2 && Math.abs(a.y - b.y) < 2;
 const fmtRect = (r) => `[${r.x.toFixed(0)},${r.y.toFixed(0)} ${r.w.toFixed(0)}x${r.h.toFixed(0)}]`;
+/* 두 heading 차이를 -π..π 로 감싼다 (화면 오른쪽 회전 = 음수) */
+const wrapPi = (a) => ((a + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
 
 /* HUD 겹침 측정(순위표 포함) */
 async function hudLayout(p) {
@@ -320,8 +322,10 @@ const heldWheel = await wheelState(page);
 ok('드래그 중 핸들이 회전(60° 이상)', heldWheel.deg > 55, heldWheel);
 ok('핸들 각도와 조향 값 일치(±0.08)', Math.abs(heldWheel.value - held.inputSteer) < 0.09, { wheel: heldWheel.value, steer: held.inputSteer });
 ok('핸들 조향이 오른쪽(+)', held.inputSteer > 0.5, held.inputSteer);
-const dhRight = ((held.h - beforeTurn.h + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-ok('핸들을 돌리면 즉시 오른쪽으로 회전', dhRight > 0.12, { dh: dhRight.toFixed(3), kmh: held.kmh.toFixed(0) });
+const dhRight = wrapPi(held.h - beforeTurn.h);
+// 카메라가 차 앞을 보므로 월드 heading 이 줄어드는 쪽이 화면 오른쪽이다
+ok('핸들을 시계방향(오른쪽)으로 돌리면 차도 화면 오른쪽으로 회전', dhRight < -0.12, { dh: dhRight.toFixed(3), kmh: held.kmh.toFixed(0) });
+ok('핸들 회전과 차의 회전 방향 일치(핸들 +, 차 음)', Math.sign(heldWheel.deg) === 1 && Math.sign(dhRight) === -1, { wheelDeg: heldWheel.deg.toFixed(1), dh: dhRight.toFixed(3) });
 ok('핸들 조향 중 슬립 각 거의 없음', held.slip < 0.02, held.slip.toFixed(4));
 await shot(page, 'shot-wheel-right.png');
 
@@ -354,8 +358,8 @@ await dragWheelTo(page, 0, -90);
 await sleep(260);
 const heldLeft = await stateOf(page);
 ok('핸들 왼쪽 조향(-0.5 이하)', heldLeft.inputSteer < -0.5, heldLeft.inputSteer);
-const dhLeft = ((heldLeft.h - beforeLeft.h + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-ok('핸들을 왼쪽으로 돌리면 왼쪽으로 회전', dhLeft < -0.12, { dh: dhLeft.toFixed(3), kmh: heldLeft.kmh.toFixed(0) });
+const dhLeft = wrapPi(heldLeft.h - beforeLeft.h);
+ok('핸들을 반시계방향(왼쪽)으로 돌리면 차도 화면 왼쪽으로 회전', dhLeft > 0.12, { dh: dhLeft.toFixed(3), kmh: heldLeft.kmh.toFixed(0) });
 await page.mouse.up();
 const leftReleased = await waitPage(page, (s) => Math.abs(s.inputSteer) < 0.03, 2500);
 ok('왼쪽 조향 후에도 복원', Math.abs(leftReleased.inputSteer) < 0.03, leftReleased.inputSteer);
@@ -373,7 +377,7 @@ const touchBefore = await stateOf(page);
   await sleep(240);
   const touchHeld = await stateOf(page);
   ok('터치 드래그로 핸들 조향', touchHeld.inputSteer > 0.35, touchHeld.inputSteer);
-  ok('터치 조향 시 즉시 회전', Math.abs(touchHeld.h - touchBefore.h) > 0.1, { dh: (touchHeld.h - touchBefore.h).toFixed(3) });
+  ok('터치 조향 시 즉시 회전(화면 오른쪽)', wrapPi(touchHeld.h - touchBefore.h) < -0.1, { dh: wrapPi(touchHeld.h - touchBefore.h).toFixed(3) });
   await page.touchscreen.touchEnd();
   const touchUp = await waitPage(page, (st) => Math.abs(st.inputSteer) < 0.03, 2500);
   ok('터치를 떼면 조향 0', Math.abs(touchUp.inputSteer) < 0.03, touchUp.inputSteer);
@@ -473,7 +477,7 @@ await sleep(260);
 const flipHeld = await stateOf(page);
 await page.mouse.up();
 ok('반전 후 오른쪽 핸들 드래그 조향', flipHeld.inputSteer > 0.45, flipHeld.inputSteer);
-ok('반전 후에도 즉시 회전', Math.abs(flipHeld.h - flipStart.h) > 0.08, { dh: (flipHeld.h - flipStart.h).toFixed(3) });
+ok('반전 후에도 즉시 회전(화면 오른쪽)', wrapPi(flipHeld.h - flipStart.h) < -0.08, { dh: wrapPi(flipHeld.h - flipStart.h).toFixed(3) });
 await waitPage(page, (s) => Math.abs(s.inputSteer) < 0.03, 2000);
 await shot(page, 'm13-controls-flip-race.png');
 
@@ -585,7 +589,7 @@ await sleep(260);
 const landHeld = await stateOf(land);
 await land.mouse.up();
 ok('가로 핸들 드래그 조향', landHeld.inputSteer > 0.45, landHeld.inputSteer);
-ok('가로 핸들 조향 즉시 회전', Math.abs(landHeld.h - landStart.h) > 0.06, (landHeld.h - landStart.h).toFixed(3));
+ok('가로 핸들 조향 즉시 회전(화면 오른쪽)', wrapPi(landHeld.h - landStart.h) < -0.06, wrapPi(landHeld.h - landStart.h).toFixed(3));
 await waitPage(land, (s) => Math.abs(s.inputSteer) < 0.03, 2000);
 await sleep(400);
 await shot(land, 'm08-landscape.png');

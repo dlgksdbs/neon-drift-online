@@ -75,7 +75,11 @@ export function stepCar(car, input, dt, world = {}) {
   const speedNarrow = 1 - 0.2 * Math.min(1, Math.abs(vf) / spec.maxSpeed);
   const steerRate = spec.steerRate * speedNarrow;
   const dir = vf < -0.5 ? -1 : 1;
-  const yaw = steerIn * steerRate * speedFactor * dir;
+  // 부호 규약: steer +1 = 운전자(화면) 기준 오른쪽.
+  // 전방 = (sin h, cos h) 이고 카메라는 차 뒤에서 전방을 바라보므로 이 좌표계에서
+  // 월드 +x 는 화면 왼쪽이다. 그래서 화면 오른쪽으로 꺾으려면 heading 을 "줄여야" 한다.
+  // (예전에는 늘려서 핸들을 오른쪽으로 돌리면 차가 왼쪽으로 갔다)
+  const yaw = -steerIn * steerRate * speedFactor * dir;
   car.h += yaw * dt;
 
   // --- 추진 / 제동
