@@ -8,6 +8,7 @@ import { TRACK, buildPads, nearest, sample } from './core/track.js';
 import { CAR_SPECS, createCar, stepCarFixed, kmh, resolveCarCollisions } from './core/physics.js';
 import { RaceProgress, rankRacers, formatTime } from './core/progress.js';
 import { createAIProfile, aiInput } from './core/ai.js';
+import { driveInputs, needsGasPedal } from './core/controls.js';
 import { createScene } from './game/scene.js';
 import { buildTrackMeshes } from './game/trackMesh.js';
 import { createCarMesh } from './game/carModel.js';
@@ -71,7 +72,7 @@ const camState = {
 };
 
 /* ----------------------------- 입력 ----------------------------- */
-const input = { steer: 0, wheel: 0, throttle: 0, brake: 0, boost: false, left: false, right: false };
+const input = { steer: 0, wheel: 0, throttle: 0, brake: 0, gas: 0, boost: false, left: false, right: false };
 const keys = new Set();
 
 const wheel = new SteeringWheel($('wheel'), { maxDeg: 135 });
@@ -102,6 +103,8 @@ function bindHold(el, onDown, onUp) {
 
 bindHold($('btnNitro'), () => { input.boost = true; }, () => { input.boost = false; });
 bindHold($('btnBrake'), () => { input.brake = 1; }, () => { input.brake = 0; });
+// 자동 가속 OFF에서만 보이는 가속 페달 — 누르고 있는 동안 스로틀 1
+bindHold($('btnGas'), () => { input.gas = 1; }, () => { input.gas = 0; });
 
 // 터치가 버튼 밖에서 끝나도 눌림 상태가 남지 않게: 마지막 손가락이 떨어질 때만 전체 해제한다.
 // (한 손으로 핸들을 돌린 채 다른 손으로 NITRO를 누르는 두 손 조작을 끊지 않는다)
@@ -110,6 +113,7 @@ function releaseAll() {
   input.left = input.right = false;
   input.boost = false;
   input.brake = 0;
+  input.gas = 0;
   document.querySelectorAll('.touchBtn.on').forEach((b) => b.classList.remove('on'));
   wheel.release();
 }
@@ -150,12 +154,12 @@ function readInput() {
   // 키보드가 눌리면 키보드 우선, 아니면 핸들 각도
   input.steer = keySteer !== 0 ? keySteer : clamp(input.wheel, -1, 1);
   const braking = input.brake > 0 || down;
-  input.throttle = braking ? 0 : (app.autoAccel ? 1 : (up ? 1 : 0));
-  if (!app.autoAccel && !up) input.throttle = 0;
+  const drive = driveInputs({ autoAccel: app.autoAccel, gasHeld: input.gas > 0, keyUp: up, braking });
+  input.throttle = drive.throttle;
   return {
     steer: input.steer,
     throttle: input.throttle,
-    brake: braking ? 1 : 0,
+    brake: drive.brake,
     boost: input.boost || keys.has('shift'),
   };
 }
@@ -236,11 +240,29 @@ function applyControlFlip(persist = true) {
     if (v) v.textContent = side;
   }
   const foot = $('footHint');
-  if (foot) {
-    foot.innerHTML = on
-      ? '조작: 오른쪽 핸들을 돌려 조향 · 왼쪽 NITRO·BRAKE<br>PC: WASD/화살표 조향 · Shift 부스터'
-      : '조작: 왼쪽 핸들을 돌려 조향 · 오른쪽 NITRO·BRAKE<br>PC: WASD/화살표 조향 · Shift 부스터';
+  updateFootHint();
+}
+
+/* 자동 가속 ON/OFF: OFF일 때만 하단 액션 패드에 GAS(가속) 페달을 붙인다 */
+function applyAutoAccel() {
+  const hudEl = $('hud');
+  if (hudEl) hudEl.classList.toggle('manual', needsGasPedal(app.autoAccel));
+  const btn = $('autoAccelBtn');
+  if (btn) {
+    btn.classList.toggle('on', app.autoAccel);
+    const v = btn.querySelector('b');
+    if (v) v.textContent = app.autoAccel ? 'ON' : 'OFF';
   }
+  updateFootHint();
+}
+
+function updateFootHint() {
+  const foot = $('footHint');
+  if (!foot) return;
+  const side = app.flipControls ? '오른쪽' : '왼쪽';
+  const other = app.flipControls ? '왼쪽' : '오른쪽';
+  const gas = needsGasPedal(app.autoAccel) ? ' · GAS 가속 페달' : '';
+  foot.innerHTML = `조작: ${side} 핸들을 돌려 조향 · ${other} NITRO·BRAKE${gas}<br>PC: WASD/화살표 조향 · Shift 부스터`;
 }
 
 function toggleControlFlip() {
@@ -269,12 +291,20 @@ function hideAllScreens() {
 /* ----------------------------- 카메라 ----------------------------- */
 function toggleCamera() {
   app.camMode = app.camMode === 'third' ? 'first' : 'third';
+  applyCamUI();
+  app.camSnap = true;   // 시점 전환은 즉시 (러프 없이)
+}
+
+/* 시점에 맞춘 HUD 배치: 1인칭이면 게이지를 콕핏과 겹치지 않는 오른쪽(미니맵 아래)으로 옮긴다.
+   게이지(속도·니트로 잔량)는 두 시점 모두에서 보인다. */
+function applyCamUI() {
   hud.setCam(app.camMode);
   const me = app.racers.find((r) => r.isMe);
   if (me) me.mesh.setCamMode(app.camMode);
+  const hudEl = $('hud');
+  if (hudEl) hudEl.classList.toggle('fp', app.camMode === 'first');
   const gw = $('gaugeWrap');
-  if (gw) gw.classList.toggle('hidden', app.camMode === 'first');   // 1인칭은 계기판이 속도를 보여준다
-  app.camSnap = true;   // 시점 전환은 즉시 (러프 없이)
+  if (gw) gw.classList.remove('hidden');
 }
 
 function updateCamera(dt) {
@@ -296,8 +326,10 @@ function updateCamera(dt) {
   if (cam.near !== wantNear) { cam.near = wantNear; cam.updateProjectionMatrix(); }
 
   if (camModeIsThird()) {
-    const back = 8.2 + speed * 0.055 + boost * 2.1;
-    const height = 3.25 + speed * 0.014 + boost * 0.32;
+    // 내 차가 화면 중앙~중하단(하단 조작부 위)에 여유 있게 놓이도록
+    // 카메라를 조금 더 높이고·멀리서, 시선은 앞·낮게 내린다. 핸들·BRAKE·NITRO가 차를 가리지 않는다.
+    const back = 9.2 + speed * 0.03 + boost * 1.2;
+    const height = 3.15 + speed * 0.004 + boost * 0.12;
     const drift = -(car.steer || 0) * 0.55;
     const target = new THREE.Vector3(
       car.x - Math.sin(yaw + drift * 0.12) * back,
@@ -306,12 +338,12 @@ function updateCamera(dt) {
     );
     const k = app.camSnap ? 1 : 1 - Math.exp(-dt * 8.0);
     camState.pos.lerp(target, k);
-    const lookTarget = new THREE.Vector3(car.x + Math.sin(car.h) * 11, 1.75, car.z + Math.cos(car.h) * 11);
+    const lookTarget = new THREE.Vector3(car.x + Math.sin(car.h) * 11.5, 1.28, car.z + Math.cos(car.h) * 11.5);
     camState.look.lerp(lookTarget, 1 - Math.exp(-dt * 10));
     cam.position.copy(camState.pos);
     cam.up.set(0, 1, 0);
     cam.lookAt(camState.look);
-    camState.fov = THREE.MathUtils.lerp(camState.fov, 68 + speed * 0.28 + boost * 8.5, 1 - Math.exp(-dt * 4));
+    camState.fov = THREE.MathUtils.lerp(camState.fov, 71 + speed * 0.16 + boost * 5, 1 - Math.exp(-dt * 4));
     // 코너링 시 살짝 기울이기
     cam.rotateZ((car.steer || 0) * 0.035 * Math.min(1, speed / 30));
   } else {
@@ -344,7 +376,7 @@ function updateCamera(dt) {
     cam.position.y += (Math.random() - 0.5) * sh * 0.7;
     camState.shake *= Math.exp(-dt * 6);
   }
-  if (app.camSnap) { camState.fov = camModeIsThird() ? 68 : 68; app.camSnap = false; }
+  if (app.camSnap) { camState.fov = 71; app.camSnap = false; }
   if (cam.fov !== camState.fov) {
     cam.fov = camState.fov;
     cam.updateProjectionMatrix();
@@ -384,6 +416,8 @@ function startSolo() {
 function beginCountdown() {
   hideAllScreens();
   hud.show();
+  applyAutoAccel();
+  applyCamUI();
   app.phase = 'countdown';
   app.collisionCount = 0;
   app.lastCollision = null;
@@ -933,8 +967,7 @@ function buildMenu() {
 
   $('autoAccelBtn').addEventListener('click', () => {
     app.autoAccel = !app.autoAccel;
-    $('autoAccelBtn').classList.toggle('on', app.autoAccel);
-    $('autoAccelBtn').querySelector('b').textContent = app.autoAccel ? 'ON' : 'OFF';
+    applyAutoAccel();
   });
   $('qualityBtn').addEventListener('click', () => {
     app.quality = app.quality === 'high' ? 'low' : 'high';
@@ -1047,6 +1080,8 @@ function frame(now) {
           on: app.camMode === 'first' && app.phase === 'racing',
           steer: input.steer,
           boost: me.car.nitroActive ? 1.2 : (me.car.boostTime > 0 ? 0.7 : 0),
+          speed: kmh(me.car),
+          fuel: me.car.boostFuel,
         });
         me.mesh.setVisible(app.camMode !== 'first' && app.phase !== 'menu');
       }
@@ -1077,6 +1112,8 @@ function frame(now) {
 /* ----------------------------- 부팅 ----------------------------- */
 function boot() {
   buildMenu();
+  applyAutoAccel();
+  applyCamUI();
   $('loading').classList.add('hidden');
   app.phase = 'idle';
   updateMenuPreview();
@@ -1144,6 +1181,31 @@ function boot() {
       };
     },
     setInput: (patch) => Object.assign(input, patch),
+    applyAutoAccel,
+    /* 화면에 그려진 내 차의 픽셀 사각형 — HUD 가림 검사용 */
+    carScreenBox: () => {
+      const me = app.racers.find((r) => r.isMe);
+      if (!me) return null;
+      const cam = view.camera;
+      const sh = me.mesh.shape;
+      const W = sh.W / 2, L = sh.L / 2;
+      const fx = Math.sin(me.car.h), fz = Math.cos(me.car.h);
+      const rx = Math.cos(me.car.h), rz = -Math.sin(me.car.h);
+      const v = new THREE.Vector3();
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const a of [-1, -0.5, 0, 0.5, 1]) {
+        for (const b of [-1, 0, 1]) {
+          for (const y of [0.1, 0.7, 1.2]) {
+            v.set(me.car.x + fx * a * L + rx * b * W, y, me.car.z + fz * a * L + rz * b * W).project(cam);
+            const px = ((v.x + 1) / 2) * window.innerWidth;
+            const py = ((1 - v.y) / 2) * window.innerHeight;
+            minX = Math.min(minX, px); maxX = Math.max(maxX, px);
+            minY = Math.min(minY, py); maxY = Math.max(maxY, py);
+          }
+        }
+      }
+      return { x: minX, y: minY, right: maxX, bottom: maxY, w: maxX - minX, h: maxY - minY };
+    },
     readPixels: () => {
       const gl = view.renderer.getContext();
       view.renderer.render(view.scene, view.camera);

@@ -8,71 +8,75 @@ import { softGlowTexture, makeCanvas, tex } from './materials.js';
    A필러 프레임 · 보닛 라인.  시점이 흔들려도 화면에 고정되어 자연스럽다.
    ============================================================================= */
 
-function clusterTexture(neonHex) {
-  return tex(makeCanvas(512, 256, (ctx, w, h) => {
-    ctx.fillStyle = '#03050c';
-    ctx.fillRect(0, 0, w, h);
-    const g = ctx.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, 'rgba(16,34,70,0.98)');
-    g.addColorStop(1, 'rgba(3,5,12,0.99)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = neonHex;
-    ctx.shadowColor = neonHex;
-    ctx.shadowBlur = 16;
+function clusterFace(ctx, w, h, neonHex, speedKmh = 0, fuel = 100) {
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#03050c';
+  ctx.fillRect(0, 0, w, h);
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, 'rgba(16,34,70,0.98)');
+  g.addColorStop(1, 'rgba(3,5,12,0.99)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = neonHex;
+  ctx.shadowColor = neonHex;
+  ctx.shadowBlur = 16;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(8, 8, w - 16, h - 16);
+
+  // 좌: 타코/속도 게이지 (바늘은 속도에 따라 움직인다)
+  const cx = 118, cy = 150, r = 78;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, Math.PI * 0.86, Math.PI * 2.14);
+  ctx.strokeStyle = 'rgba(90,190,255,0.22)';
+  ctx.lineWidth = 12;
+  ctx.stroke();
+  const ratio = Math.max(0, Math.min(1, speedKmh / 260));
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, Math.PI * 1.02, Math.PI * (1.02 + 0.96 * Math.max(0.015, ratio)));
+  ctx.strokeStyle = neonHex;
+  ctx.lineWidth = 12;
+  ctx.stroke();
+  for (let i = 0; i <= 10; i++) {
+    const a = Math.PI * 0.86 + (i / 10) * Math.PI * 1.28;
+    const r1 = r - 16, r2 = r - (i % 5 === 0 ? 30 : 22);
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    ctx.strokeStyle = i > 7 ? '#ff4b7d' : 'rgba(180,230,255,0.75)';
     ctx.lineWidth = 3;
-    ctx.strokeRect(8, 8, w - 16, h - 16);
-
-    // 좌: 타코/속도 게이지
-    const cx = 118, cy = 150, r = 78;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, Math.PI * 0.86, Math.PI * 2.14);
-    ctx.strokeStyle = 'rgba(90,190,255,0.22)';
-    ctx.lineWidth = 12;
     ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, Math.PI * 1.02, Math.PI * 1.74);
-    ctx.strokeStyle = neonHex;
-    ctx.lineWidth = 12;
-    ctx.stroke();
-    for (let i = 0; i <= 10; i++) {
-      const a = Math.PI * 0.86 + (i / 10) * Math.PI * 1.28;
-      const r1 = r - 16, r2 = r - (i % 5 === 0 ? 30 : 22);
-      ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
-      ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
-      ctx.strokeStyle = i > 7 ? '#ff4b7d' : 'rgba(180,230,255,0.75)';
-      ctx.lineWidth = 3;
-      ctx.stroke();
-    }
-    ctx.fillStyle = neonHex;
-    ctx.shadowBlur = 22;
-    ctx.font = '900 54px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('NEON', cx, cy + 6);
-    ctx.font = '700 15px system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(150,205,255,0.9)';
-    ctx.shadowBlur = 8;
-    ctx.fillText('MOTORSPORT', cx, cy + 30);
+  }
+  ctx.fillStyle = neonHex;
+  ctx.shadowBlur = 22;
+  ctx.font = '900 54px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('NEON', cx, cy + 6);
+  ctx.font = '700 15px system-ui, sans-serif';
+  ctx.fillStyle = 'rgba(150,205,255,0.9)';
+  ctx.shadowBlur = 8;
+  ctx.fillText('MOTORSPORT', cx, cy + 30);
 
-    // 우: 부스트/연료 바
-    for (let i = 0; i < 10; i++) {
-      const bh = 26 + i * 12;
-      ctx.fillStyle = i < 7 ? neonHex : '#ff4b7d';
-      ctx.globalAlpha = 0.9;
-      ctx.fillRect(268 + i * 22, 190 - bh, 14, bh);
-    }
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = 'rgba(160,220,255,0.85)';
-    ctx.font = '700 18px system-ui, sans-serif';
-    ctx.fillText('NITRO', 372, 214);
-    ctx.fillStyle = neonHex;
-    ctx.font = '900 44px system-ui, sans-serif';
-    ctx.fillText('000', 330, 60);
-    ctx.fillStyle = 'rgba(140,190,240,0.8)';
-    ctx.font = '700 14px system-ui, sans-serif';
-    ctx.fillText('km/h', 414, 60);
-  }), { srgb: true });
+  // 우: 실제 속도 + 니트로 잔량 바 (숫자와 바가 겹치지 않게 바 높이를 낮춘다)
+  const bars = 10;
+  const lit = Math.round((Math.max(0, Math.min(100, fuel)) / 100) * bars);
+  for (let i = 0; i < bars; i++) {
+    const bh = 18 + i * 9;
+    ctx.fillStyle = i < 7 ? neonHex : '#ff4b7d';
+    ctx.globalAlpha = i < lit ? 0.9 : 0.16;
+    ctx.fillRect(268 + i * 22, 190 - bh, 14, bh);
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(160,220,255,0.85)';
+  ctx.font = '700 18px system-ui, sans-serif';
+  ctx.fillText('NITRO', 372, 214);
+  ctx.fillStyle = neonHex;
+  ctx.shadowBlur = 16;
+  ctx.font = '900 44px system-ui, sans-serif';
+  ctx.fillText(String(Math.round(speedKmh)).padStart(3, '0'), 330, 60);
+  ctx.fillStyle = 'rgba(140,190,240,0.8)';
+  ctx.shadowBlur = 8;
+  ctx.font = '700 14px system-ui, sans-serif';
+  ctx.fillText('km/h', 414, 60);
 }
 
 export class Cockpit {
@@ -136,13 +140,19 @@ export class Cockpit {
     this.group.add(this.soft);
 
     /* ---------- 계기판 ---------- */
+    this.clusterColor = '#' + col.getHexString();
+    this.clusterCanvas = makeCanvas(512, 256, (ctx, w, h) => clusterFace(ctx, w, h, this.clusterColor, 0, 100));
+    this.clusterTex = tex(this.clusterCanvas, { srgb: true });
     this.cluster = new THREE.Mesh(
       new THREE.PlaneGeometry(0.27, 0.140),
-      new THREE.MeshBasicMaterial({ map: clusterTexture('#' + col.getHexString()), transparent: true })
+      new THREE.MeshBasicMaterial({ map: this.clusterTex, transparent: true })
     );
     this.cluster.position.set(-0.045, -0.250, -0.660);
     this.cluster.rotation.x = -0.36;
     this.group.add(this.cluster);
+    this._clusterAt = 0;
+    this._clusterSpeed = -1;
+    this._clusterFuel = -1;
 
     /* ---------- 스티어링 휠 ---------- */
     const wheelParts = [];
@@ -221,9 +231,20 @@ export class Cockpit {
     this.trim.material.color.copy(col);
     this.hoodNeon.material.color.copy(col);
     this.paint.color.copy(col.clone().multiplyScalar(0.5).add(new THREE.Color(0x0a1220)));
-    this.cluster.material.map.dispose();
-    this.cluster.material.map = clusterTexture('#' + col.getHexString());
-    this.cluster.material.needsUpdate = true;
+    this.clusterColor = '#' + col.getHexString();
+    this._clusterSpeed = -1;
+    this._clusterFuel = -1;
+    this._clusterAt = 0;
+  }
+
+  /* 계기판에 실제 속도·니트로 잔량을 그린다(초당 8회 이하로만 again) */
+  _drawCluster(speedKmh, fuel) {
+    const s = Math.round(speedKmh), f = Math.round(fuel);
+    if (s === this._clusterSpeed && f === this._clusterFuel) return;
+    this._clusterSpeed = s;
+    this._clusterFuel = f;
+    clusterFace(this.clusterCanvas.getContext('2d'), 512, 256, this.clusterColor, s, f);
+    this.clusterTex.needsUpdate = true;
   }
 
   update(camera, dt, opts = {}) {
@@ -243,5 +264,10 @@ export class Cockpit {
     this.trim.scale.setScalar(1);
     this.cluster.material.opacity = 0.9 + this._boost * 0.1;
     this.cluster.material.color.setScalar(v);
+    this._clusterAt += dt;
+    if (this._clusterAt > 0.12) {
+      this._clusterAt = 0;
+      this._drawCluster(opts.speed || 0, opts.fuel === undefined ? 100 : opts.fuel);
+    }
   }
 }

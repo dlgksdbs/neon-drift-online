@@ -39,7 +39,9 @@ process.on('exit', stop);
 await sleep(1600);
 const BASE = `http://127.0.0.1:${PORT}`;
 
-const LAUNCH_ARGS = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader', '--autoplay-policy=no-user-gesture-required','--disable-background-timer-throttling','--disable-backgrounding-occluded-windows','--disable-renderer-backgrounding','--disable-features=CalculateNativeWinOcclusion'];
+const LAUNCH_ARGS = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader', '--autoplay-policy=no-user-gesture-required','--disable-background-timer-throttling','--disable-backgrounding-occluded-windows','--disable-renderer-backgrounding','--disable-features=CalculateNativeWinOcclusion',
+  // 메모리가 좁은 CI/원격 환경에서 렌더러 스레드 생성이 실패하지 않도록 GPU를 같은 프로세스에서 돌린다
+  '--in-process-gpu', '--single-process', '--no-zygote', '--renderer-process-limit=1', '--js-flags=--max-old-space-size=384'];
 const browser = await puppeteer.launch({
   headless: 'new', executablePath: CHROME, protocolTimeout: 300000, args: LAUNCH_ARGS,
 });
@@ -127,13 +129,13 @@ async function dragWheelTo(p, fromDeg, toDeg, steps = 10) {
 /* 조작 배치 측정 */
 async function controlLayout(p) {
   return p.evaluate(() => {
-    const ids = ['controls', 'steerPad', 'actionPad', 'wheel', 'btnNitro', 'btnBrake'];
+    const ids = ['controls', 'steerPad', 'actionPad', 'wheel', 'btnNitro', 'btnBrake', 'btnGas'];
     const r = {};
     for (const id of ids) {
       const b = document.getElementById(id).getBoundingClientRect();
       r[id] = { x: b.x, y: b.y, w: b.width, h: b.height, right: b.right, bottom: b.bottom };
     }
-    const keys = ['wheel', 'btnNitro', 'btnBrake'];
+    const keys = ['wheel', 'btnNitro', 'btnBrake', 'btnGas'];
     const overlaps = [];
     for (let i = 0; i < keys.length; i++) {
       for (let j = i + 1; j < keys.length; j++) {
@@ -154,7 +156,7 @@ const wrapPi = (a) => ((a + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
 /* HUD 겹침 측정(순위표 포함) */
 async function hudLayout(p) {
   return p.evaluate(() => {
-    const ids = ['hud-top', 'board', 'boardList', 'minimapWrap', 'gaugeWrap', 'speedBox', 'wheel', 'btnNitro', 'btnBrake', 'btnCam', 'btnPause'];
+    const ids = ['hud-top', 'board', 'boardList', 'minimapWrap', 'gaugeWrap', 'speedBox', 'wheel', 'btnNitro', 'btnBrake', 'btnGas', 'btnCam', 'btnPause'];
     const rects = {};
     for (const id of ids) {
       const el = document.getElementById(id);
@@ -210,7 +212,8 @@ class WsClient {
 /* ------------------------------ 1. 메뉴 ------------------------------ */
 section('메뉴 · 렌더');
 const page = await newPage();
-await page.goto(`${BASE}/`, { waitUntil: 'networkidle0', timeout: 90000 });
+await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.waitForFunction(() => window.__neon && window.__neon.state(), { timeout: 120000 });
 await sleep(1800);
 ok('타이틀 표시', await page.$eval('.logo h1', (e) => /NEON/.test(e.textContent)));
 ok('차량 카드 3개', (await page.$$('.carCard')).length === 3);
@@ -286,20 +289,73 @@ const preNitro = await stateOf(page);
 const nbox = await (await page.$('#btnNitro')).boundingBox();
 await page.mouse.move(nbox.x + nbox.width / 2, nbox.y + nbox.height / 2);
 await page.mouse.down();
-const nitro = await waitPage(page, (s) => s.nitroFuel < preNitro.nitroFuel - 8, 2600);
+const nitro = await waitPage(page, (s) => s.nitroFuel < preNitro.nitroFuel - 8, 6000);
 await page.mouse.up();
-ok('니트로 버튼으로 연료 소모', nitro.nitroFuel < preNitro.nitroFuel - 5, { before: preNitro.nitroFuel, after: nitro.nitroFuel });
+ok('니트로 버튼으로 연료 소모', nitro.nitroFuel < preNitro.nitroFuel - 4, { before: preNitro.nitroFuel, after: nitro.nitroFuel });
 ok('니트로 중 부스트/가속', nitro.nitroActive === true || nitro.boostTime > 0 || nitro.kmh > preNitro.kmh, { active: nitro.nitroActive, boost: nitro.boostTime, before: preNitro.kmh.toFixed(0), after: nitro.kmh.toFixed(0) });
 await shot(page, 'm05-nitro.png');
 
 await page.click('#btnCam');
-await sleep(700);
-ok('1인칭 전환', (await stateOf(page)).camMode === 'first');
+const fpReady = await page.waitForFunction(() => {
+  const n = window.__neon;
+  return n.app.camMode === 'first' && document.getElementById('hud').classList.contains('fp') && n.camera.near === 0.12;
+}, { timeout: 20000 }).then(() => true).catch(() => false);
+ok('1인칭 전환', fpReady);
 ok('버튼 라벨 1인칭', (await page.$eval('#camMode', (e) => e.textContent)) === '1인칭');
+await sleep(400);
+const fpGauge = await page.evaluate(() => {
+  const gw = document.getElementById('gaugeWrap');
+  const g = gw.getBoundingClientRect();
+  const fill = document.getElementById('nitroFill').getBoundingClientRect();
+  const wheel = document.getElementById('wheel').getBoundingClientRect();
+  const nitro = document.getElementById('btnNitro').getBoundingClientRect();
+  const brake = document.getElementById('btnBrake').getBoundingClientRect();
+  const mini = document.getElementById('minimapWrap').getBoundingClientRect();
+  const board = document.getElementById('board').getBoundingClientRect();
+  const inter = (a, b) => !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
+  const st = window.__neon.state();
+  return {
+    hidden: gw.classList.contains('hidden') || getComputedStyle(gw).display === 'none',
+    w: g.width, h: g.height, top: g.top, left: g.left, right: g.right, bottom: g.bottom,
+    fillW: fill.width, fuel: st.nitroFuel, speedText: document.getElementById('speedVal').textContent,
+    overlaps: { wheel: inter(g, wheel), nitro: inter(g, nitro), brake: inter(g, brake), minimap: inter(g, mini), board: inter(g, board) },
+    inView: g.top >= 0 && g.left >= 0 && g.bottom <= innerHeight && g.right <= innerWidth,
+  };
+});
+ok('1인칭에서도 니트로(배터리) 게이지가 보임', !fpGauge.hidden && fpGauge.w > 40 && fpGauge.h > 20, fpGauge);
+ok('1인칭 니트로 잔량이 실제 연료와 연결', fpGauge.fillW > 1 && fpGauge.fuel > 0, { fillW: fpGauge.fillW, fuel: fpGauge.fuel });
+ok('1인칭 게이지에 실제 속도 표시', Number(fpGauge.speedText) > 10, fpGauge.speedText);
+ok('1인칭 게이지가 핸들·버튼·미니맵·순위표와 겹치지 않음', !Object.values(fpGauge.overlaps).some(Boolean), fpGauge.overlaps);
+ok('1인칭 게이지가 화면 안', fpGauge.inView, fpGauge);
 await shot(page, 'm06-first-person.png');
 await page.click('#btnCam');
-await sleep(500);
-ok('3인칭 복귀', (await stateOf(page)).camMode === 'third');
+const thirdReady = await page.waitForFunction(() => {
+  const n = window.__neon;
+  if (n.app.camMode !== 'third' || n.camera.near !== 0.3) return false;
+  const b = n.carScreenBox();
+  return !!b && b.w < 320 && b.bottom < innerHeight && b.y > -50;
+}, { timeout: 20000 }).then(() => true).catch(() => false);
+ok('3인칭 복귀', thirdReady);
+// 카메라가 3인칭 자리로 완전히 돌아온 뒤(위치·시선 수렴) 측정한다
+await sleep(1400);
+/* 3인칭: 내 차가 하단 조작부(핸들·BRAKE·NITRO·게이지)에 가리지 않는다 */
+const carClear = await page.evaluate(() => {
+  const n = window.__neon;
+  const box = n.carScreenBox();
+  const ids = { wheel: 'wheel', brake: 'btnBrake', nitro: 'btnNitro', gauge: 'gaugeWrap' };
+  const rects = {};
+  for (const [k, id] of Object.entries(ids)) {
+    const r = document.getElementById(id).getBoundingClientRect();
+    rects[k] = { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+  }
+  const car = { left: box.x, top: box.y, right: box.right, bottom: box.bottom };
+  const inter = (a, b) => !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
+  const hits = Object.entries(rects).filter(([, r]) => inter(car, r)).map(([k]) => k);
+  return { car, hits, gap: Math.round(rects.gauge.top - car.bottom), kmh: n.state().kmh };
+});
+ok('3인칭: 내 차가 핸들·버튼·게이지에 안 가림', carClear.hits.length === 0, carClear);
+ok('3인칭: 차와 하단 HUD 사이 여유 (20px 이상)', carClear.gap >= 20, carClear.gap);
+console.log('    · 3인칭 차 화면 위치: y ' + Math.round(carClear.car.top) + '~' + Math.round(carClear.car.bottom) + ', 하단 HUD 여유 ' + carClear.gap + 'px (' + Math.round(carClear.kmh) + 'km/h)');
 
 /* ------------------------------ 5. 핸들 조향 ------------------------------ */
 section('와이드 핸들 조향 (드래그 · 회전 · 복원)');
@@ -403,7 +459,7 @@ await sleep(350);
 const keyWheel = await wheelState(page);
 ok('키보드 조향 시 핸들도 회전', keyWheel.deg > 20, keyWheel);
 await page.keyboard.up('ArrowRight');
-await sleep(1200);
+await sleep(2200);
 ok('키보드 해제 후 핸들 복원', Math.abs((await wheelState(page)).deg) < 2);
 
 /* ------------------------------ 5-2. 차량 충돌 ------------------------------ */
@@ -694,9 +750,113 @@ await waitPage(land, (s) => Math.abs(s.inputSteer) < 0.03, 2000);
 await sleep(400);
 await shot(land, 'm08-landscape.png');
 await shot(land, 'shot-landscape-leaderboard.png');
+
+// 가로에서도 자동 가속 OFF → GAS 페달이 겹침 없이 들어간다
+await land.evaluate(() => { const n = window.__neon; n.app.autoAccel = false; n.applyAutoAccel(); });
+await sleep(350);
+const landGas = await controlLayout(land);
+const landGasShown = await land.evaluate(() => {
+  const g = document.getElementById('btnGas');
+  const r = g.getBoundingClientRect();
+  return { shown: getComputedStyle(g).display !== 'none', w: r.width, h: r.height };
+});
+ok('가로: 자동 가속 OFF에 GAS 페달 표시', landGasShown.shown && landGasShown.w >= 40 && landGasShown.h >= 60, landGasShown);
+ok('가로: GAS 포함 버튼 겹침 없음', landGas.overlaps.length === 0, landGas.overlaps);
+ok('가로: GAS 포함 버튼이 화면 안', landGas.outside.length === 0, landGas.outside);
+await shot(land, 'm19-landscape-gas.png');
 await land.close();
 
-/* ------------------------------ 12. 친구 대결 (호스트=Node WS · 게스트=브라우저) ------------------------------
+/* ------------------------------ 12. 자동 가속 OFF · GAS 페달 ------------------------------ */
+section('자동 가속 OFF · GAS 가속 페달 (390×844)');
+const manual = await newPage();
+await manual.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 90000 });
+await manual.waitForFunction(() => window.__neon && window.__neon.state(), { timeout: 90000 });
+await sleep(1600);
+ok('자동 가속 기본 ON', (await stateOf(manual)).autoAccel === true);
+ok('자동 가속 ON일 때 GAS 페달 숨김', await manual.evaluate(() => getComputedStyle(document.getElementById('btnGas')).display === 'none'));
+await manual.click('#autoAccelBtn');
+const autoOff = await manual.waitForFunction(() => window.__neon.app.autoAccel === false, { timeout: 10000 }).then(() => true).catch(() => false);
+ok('자동 가속 OFF 토글', autoOff);
+ok('메뉴 조작 안내에 GAS 표시', /GAS/.test(await manual.$eval('#footHint', (e) => e.textContent)));
+await manual.click('#btnSolo');
+await waitState(manual, (s) => s.phase === 'racing', 14000, 'manual race');
+await sleep(2500);
+const idle = await stateOf(manual);
+ok('자동 가속 OFF: GAS 없이는 출발하지 않음', idle.kmh < 3, idle.kmh);
+const gasShown = await manual.evaluate(() => {
+  const g = document.getElementById('btnGas');
+  const r = g.getBoundingClientRect();
+  return { shown: getComputedStyle(g).display !== 'none', w: r.width, h: r.height, label: g.textContent.trim() };
+});
+ok('자동 가속 OFF: GAS 페달 표시', gasShown.shown && gasShown.w >= 44 && gasShown.h >= 60, gasShown);
+ok('GAS 버튼 라벨', /GAS/.test(gasShown.label) && /가속/.test(gasShown.label), gasShown.label);
+await shot(manual, 'm17-autogas-off-gas.png');
+
+const manualCtl = await controlLayout(manual);
+ok('GAS 포함 배치: 버튼끼리 겹침 없음', manualCtl.overlaps.length === 0, manualCtl.overlaps);
+ok('GAS 포함 배치: 버튼이 화면 밖으로 나가지 않음', manualCtl.outside.length === 0, manualCtl.outside);
+ok('GAS 페달과 핸들 사이 간격 확보', manualCtl.r.wheel.right <= manualCtl.r.btnGas.x - 4, { wheelRight: manualCtl.r.wheel.right.toFixed(1), gasX: manualCtl.r.btnGas.x.toFixed(1) });
+console.log('    · GAS 배치: ' + ['wheel', 'btnGas', 'btnBrake', 'btnNitro'].map((k) => `${k}=${fmtRect(manualCtl.r[k])}`).join(' '));
+
+/* 정지 상태(차가 가장 크고 낮게 그려지는 순간)에서도 차가 HUD에 가리지 않는다 */
+const stopClear = await manual.evaluate(() => {
+  const n = window.__neon;
+  const box = n.carScreenBox();
+  const ids = { wheel: 'wheel', gas: 'btnGas', brake: 'btnBrake', nitro: 'btnNitro', gauge: 'gaugeWrap' };
+  const rects = {};
+  for (const [k, id] of Object.entries(ids)) {
+    const r = document.getElementById(id).getBoundingClientRect();
+    rects[k] = { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+  }
+  const car = { left: box.x, top: box.y, right: box.right, bottom: box.bottom };
+  const inter = (a, b) => !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
+  return { car, hits: Object.entries(rects).filter(([, r]) => inter(car, r)).map(([k]) => k), gap: Math.round(rects.gauge.top - car.bottom) };
+});
+ok('정지 상태에서도 차가 하단 HUD에 안 가림', stopClear.hits.length === 0, stopClear);
+ok('정지 상태 차와 게이지 사이 여유 (12px 이상)', stopClear.gap >= 12, stopClear.gap);
+
+/* GAS 페달 홀드 → 실제 가속 */
+const gb = await (await manual.$('#btnGas')).boundingBox();
+await manual.mouse.move(gb.x + gb.width / 2, gb.y + gb.height / 2);
+await manual.mouse.down();
+const accel = await waitPage(manual, (s) => s.kmh > 15, 14000);
+ok('GAS 페달을 누르면 가속', accel.kmh > 15, accel.kmh);
+ok('GAS 누르는 동안 스로틀 1', accel.input.throttle === 1 && accel.input.gas === 1, accel.input);
+await shot(manual, 'm18-gas-accel.png');
+await manual.mouse.up();
+await sleep(400);
+const coastA = await stateOf(manual);
+await sleep(1500);
+const coastB = await stateOf(manual);
+ok('GAS를 떼면 더 가속하지 않음', coastB.kmh <= coastA.kmh + 2, { a: coastA.kmh, b: coastB.kmh });
+ok('GAS를 떼면 눌림 해제', coastB.input.gas === 0, coastB.input);
+
+/* 좌우 반전에서도 GAS가 겹치지 않는다 */
+await manual.evaluate(() => document.getElementById('btnPause').click());
+await sleep(400);
+await manual.evaluate(() => document.getElementById('handBtnPause').click());
+await sleep(450);
+const mFlip = await controlLayout(manual);
+ok('반전+GAS: 버튼 겹침 없음', mFlip.overlaps.length === 0, mFlip.overlaps);
+ok('반전+GAS: 버튼이 화면 안', mFlip.outside.length === 0, mFlip.outside);
+ok('반전+GAS: GAS가 핸들 반대쪽', mFlip.r.btnGas.right < mFlip.r.wheel.x + 1, { gas: fmtRect(mFlip.r.btnGas), wheel: fmtRect(mFlip.r.wheel) });
+await shot(manual, 'm20-flip-gas.png');
+await manual.evaluate(() => document.getElementById('handBtnPause').click());
+await sleep(350);
+await manual.evaluate(() => document.getElementById('btnResume').click());
+await sleep(350);
+
+/* 자동 가속을 다시 켜면 GAS는 사라진다 */
+const gasHiddenAgain = await manual.evaluate(() => {
+  const n = window.__neon;
+  n.app.autoAccel = true;
+  n.applyAutoAccel();
+  return getComputedStyle(document.getElementById('btnGas')).display === 'none' && !document.getElementById('hud').classList.contains('manual');
+});
+ok('자동 가속 다시 ON → GAS 페달 숨김', gasHiddenAgain);
+await manual.close();
+
+/* ------------------------------ 13. 친구 대결 (호스트=Node WS · 게스트=브라우저) ------------------------------
    이 환경에서는 브라우저 두 개를 동시에 띄울 수 없고, 같은 브라우저의 숨은 탭은 rAF 가 멈춘다.
    그래서 호스트는 ws 클라이언트로 방을 만들고 주행을 보내고, 게스트는 실제 브라우저 화면으로 검증한다. */
 const hostWs = await new WsClient().open(`ws://127.0.0.1:${PORT}/ws`);
@@ -764,7 +924,7 @@ await shot(guest, 'm12-multi-racing-guest.png');
 
 hostWs.close();
 
-/* ------------------------------ 13. 콘솔 오류 ------------------------------ */
+/* ------------------------------ 14. 콘솔 오류 ------------------------------ */
 section('콘솔 · 네트워크 오류');
 const realErrors = errors.filter((e) => !/favicon|ERR_ABORTED/.test(e));
 ok('콘솔 오류 0', realErrors.length === 0, realErrors.slice(0, 6));

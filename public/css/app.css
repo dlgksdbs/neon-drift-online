@@ -134,6 +134,22 @@ html, body {
 }
 #speedBox span { font-size: 11px; color: #7fc4ea; letter-spacing: 1px; }
 .bars { display: flex; flex-direction: column; gap: 4px; width: 208px; }
+
+/* 1인칭: 콕핏 대시보드가 화면 하단을 차지하므로 게이지(속도·니트로 잔량)를
+   미니맵 바로 아래 오른쪽으로 옮겨 계기판과 겹치지 않게 띄운다. */
+#hud.fp #gaugeWrap {
+  left: auto; right: 10px; top: calc(var(--safe-t) + 158px); bottom: auto;
+  width: 92px; gap: 3px; align-items: flex-end;
+  padding: 6px 8px 5px; border-radius: 12px;
+  background: rgba(6, 10, 26, 0.58); border: 1px solid rgba(34, 230, 255, .22);
+  box-shadow: 0 0 16px rgba(34, 230, 255, .12), inset 0 0 12px rgba(40, 120, 220, .12);
+  backdrop-filter: blur(6px);
+}
+#hud.fp #speedBox { align-self: flex-end; }
+#hud.fp #speedVal { font-size: 28px; }
+#hud.fp #speedBox span { font-size: 9px; letter-spacing: .5px; }
+#hud.fp .bars { width: 100%; }
+#hud.fp .bar { height: 10px; }
 .bar {
   position: relative; height: 9px; border-radius: 6px; overflow: hidden;
   background: rgba(10, 16, 34, .8); border: 1px solid rgba(120, 160, 220, .28);
@@ -216,12 +232,34 @@ html, body {
 }
 #btnBrake.on { background: radial-gradient(circle at 35% 30%, rgba(255, 120, 170, .8), rgba(130, 15, 60, .9)); box-shadow: 0 0 24px rgba(255, 60, 130, .7); }
 
+/* ---------------- 수동 가속 페달 (자동 가속 OFF일 때만 표시) ----------------
+   액션 패드 왼쪽 기둥을 세로로 꽉 채우는 페달. NITRO(오른쪽 아래)·BRAKE(오른쪽 위)와
+   겹치지 않게 배치하고, 좌우 반전이면 통째로 거울처럼 뒤집는다. */
+#btnGas {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: calc(var(--ctl) * 0.92); border-radius: 22px;
+  display: none; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  font-size: 15px; letter-spacing: 1px; color: #d9fff2;
+  border-color: rgba(80, 255, 190, .55);
+  box-shadow: 0 0 16px rgba(40, 255, 180, .24), inset 0 0 18px rgba(40, 210, 160, .14);
+}
+#btnGas em { font-style: normal; font-size: 9px; font-weight: 700; letter-spacing: .4px; color: #7ff0c6; }
+#hud.manual #btnGas { display: flex; }
+#hud.manual #btnNitro { width: calc(var(--ctl) * 1.0); height: calc(var(--ctl) * 1.0); }
+#hud.manual #btnBrake { left: auto; right: 0; top: 0; }
+#btnGas.on {
+  background: radial-gradient(circle at 35% 30%, rgba(110, 255, 210, .85), rgba(6, 90, 70, .9));
+  box-shadow: 0 0 28px rgba(80, 255, 200, .7), inset 0 0 20px rgba(120, 255, 220, .4);
+}
+
 /* ---------------- 조작 좌우 반전 (#hud.flip) ----------------
    기본: 왼쪽 핸들 / 오른쪽 액션 피드
    반전: 좌우를 거울처럼 뒤집는다(터치 영역 동일, 여백만 거울 대칭) */
 #hud.flip #controls { flex-direction: row-reverse; }
 #hud.flip #btnNitro { right: auto; left: 0; }
 #hud.flip #btnBrake { left: auto; right: 2px; }
+#hud.flip #btnGas { left: auto; right: 0; }
+#hud.flip.manual #btnBrake { left: 0; right: auto; }
 
 /* ---------------- 이펙트 오버레이 ---------------- */
 #speedlines {
@@ -413,4 +451,8 @@ input::placeholder { color: #5c7599; }
   .screen { padding-top: calc(var(--safe-t) + 8px); }
   .menuScroll { max-width: 560px; }
   .bars { width: 170px; }
+  #hud.fp #gaugeWrap { top: calc(var(--safe-t) + 130px); width: 78px; padding: 4px 6px 4px; }
+  #hud.fp #speedVal { font-size: 22px; }
+  #hud.fp .bars { width: 100%; }
+  #btnGas { width: calc(var(--ctl) * 0.94); border-radius: 16px; font-size: 12px; }
 }

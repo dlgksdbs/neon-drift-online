@@ -7,6 +7,7 @@ import { CAR_SPECS, createCar, stepCar, stepCarFixed, kmh, WALL_LIMIT, CAR_BODY,
 import { RaceProgress, rankRacers, formatTime } from '../public/js/core/progress.js';
 import { createAIProfile, aiInput, minRadiusAhead } from '../public/js/core/ai.js';
 import * as physics from '../public/js/core/physics.js';
+import { driveInputs, needsGasPedal } from '../public/js/core/controls.js';
 
 let pass = 0, fail = 0;
 const fails = [];
@@ -467,6 +468,22 @@ section('차량 스펙 차이');
   ok('하이퍼카가 최고속', CAR_SPECS.hyper.maxSpeed === Math.max(...speeds));
   ok('GT가 조향 응답 최고', CAR_SPECS.gt.steerRate === Math.max(...Object.values(CAR_SPECS).map((s) => s.steerRate)));
   ok('모든 차량 그립 20 이상', Object.values(CAR_SPECS).every((s) => s.grip >= 20));
+}
+
+section('조작 입력 · 자동 가속 / GAS 페달');
+{
+  const d = (o) => driveInputs(o);
+  ok('자동 가속 ON: 누르지 않아도 스로틀 1', d({ autoAccel: true, gasHeld: false, keyUp: false, braking: false }).throttle === 1);
+  ok('자동 가속 OFF: 아무것도 안 누르면 스로틀 0', d({ autoAccel: false, gasHeld: false, keyUp: false, braking: false }).throttle === 0);
+  ok('자동 가속 OFF + GAS 페달 → 스로틀 1', d({ autoAccel: false, gasHeld: true, keyUp: false, braking: false }).throttle === 1);
+  ok('자동 가속 OFF + W/↑ → 스로틀 1', d({ autoAccel: false, gasHeld: false, keyUp: true, braking: false }).throttle === 1);
+  ok('자동 가속 OFF + GAS와 브레이크 동시 → 스로틀 0/브레이크 1', (() => { const r = d({ autoAccel: false, gasHeld: true, keyUp: false, braking: true }); return r.throttle === 0 && r.brake === 1; })());
+  ok('자동 가속 ON + 브레이크 → 브레이크 우선', (() => { const r = d({ autoAccel: true, gasHeld: false, keyUp: false, braking: true }); return r.throttle === 0 && r.brake === 1; })());
+  ok('GAS 페달은 자동 가속 OFF일 때만 필요', needsGasPedal(false) === true && needsGasPedal(true) === false);
+
+  // 페달을 떼면 (같은 조건에서) 다시 스로틀이 0이 된다
+  ok('GAS 홀드 → 해제 시 스로틀 0', d({ autoAccel: false, gasHeld: true, keyUp: false, braking: false }).throttle === 1
+    && d({ autoAccel: false, gasHeld: false, keyUp: false, braking: false }).throttle === 0);
 }
 
 console.log(`\n=== 결과: ${pass} 통과 / ${fail} 실패 ===`);
