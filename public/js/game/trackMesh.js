@@ -411,7 +411,7 @@ export function buildTrackMeshes(scene, track, padsWorld) {
   startGroup.add(new THREE.Mesh(mergeGeometries(startStruct), new THREE.MeshStandardMaterial({
     color: 0x141a2e, metalness: 0.85, roughness: 0.33, envMapIntensity: 1.1,
   })));
-  startGroup.add(new THREE.Mesh(mergeGeometries(startNeon), new THREE.MeshBasicMaterial({ color: COL.cyan })));
+  startGroup.add(new THREE.Mesh(mergeGeometries(startNeon), new THREE.MeshBasicMaterial({ color: 0x1fa8c8 })));
 
   const checker = new THREE.Mesh(
     new THREE.PlaneGeometry(hw * 2, 3.4),
@@ -422,8 +422,8 @@ export function buildTrackMeshes(scene, track, padsWorld) {
   startGroup.add(checker);
 
   const bannerMat = new THREE.MeshBasicMaterial({
-    map: textTexture('NEON DRIFT', '#9ceaff', 'HARBOR CIRCUIT', { w: 1024, h: 256 }),
-    transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false,
+    map: textTexture('NEON DRIFT', '#6fc8e6', 'HARBOR CIRCUIT', { w: 1024, h: 256 }),
+    transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false,
   });
   for (const [z, ry] of [[0.5, 0], [-0.5, Math.PI]]) {
     const banner = new THREE.Mesh(new THREE.PlaneGeometry(pillarW * 1.6, 2.4), bannerMat);

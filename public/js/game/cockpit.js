@@ -84,8 +84,8 @@ export class Cockpit {
 
     const col = new THREE.Color(neonColor);
     this.neon = col;
-    const dark = new THREE.MeshStandardMaterial({ color: 0x232b40, roughness: 0.5, metalness: 0.5, envMapIntensity: 1.2, emissive: 0x0a1020, emissiveIntensity: 0.9 });
-    const soft = new THREE.MeshStandardMaterial({ color: 0x232a3e, roughness: 0.8, metalness: 0.25 });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x2b3550, roughness: 0.46, metalness: 0.55, envMapIntensity: 1.4, emissive: 0x16233c, emissiveIntensity: 1.6 });
+    const soft = new THREE.MeshStandardMaterial({ color: 0x2c3550, roughness: 0.8, metalness: 0.25, emissive: 0x101a2c, emissiveIntensity: 1.2 });
     const paint = new THREE.MeshStandardMaterial({
       color: col.clone().multiplyScalar(0.5).add(new THREE.Color(0x0a1220)),
       metalness: 0.78, roughness: 0.22, envMapIntensity: 1.7,
