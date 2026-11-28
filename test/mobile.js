@@ -351,11 +351,13 @@ const carClear = await page.evaluate(() => {
   const car = { left: box.x, top: box.y, right: box.right, bottom: box.bottom };
   const inter = (a, b) => !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
   const hits = Object.entries(rects).filter(([, r]) => inter(car, r)).map(([k]) => k);
-  return { car, hits, gap: Math.round(rects.gauge.top - car.bottom), kmh: n.state().kmh };
+  // 게이지는 오른쪽 기둥에 있으므로, 하단 조작부(핸들·버튼)와 차 사이 여유를 본다
+  const rowTop = Math.min(rects.wheel.top, rects.brake.top, rects.nitro.top);
+  return { car, hits, gap: Math.round(rowTop - car.bottom), kmh: n.state().kmh };
 });
 ok('3인칭: 내 차가 핸들·버튼·게이지에 안 가림', carClear.hits.length === 0, carClear);
-ok('3인칭: 차와 하단 HUD 사이 여유 (20px 이상)', carClear.gap >= 20, carClear.gap);
-console.log('    · 3인칭 차 화면 위치: y ' + Math.round(carClear.car.top) + '~' + Math.round(carClear.car.bottom) + ', 하단 HUD 여유 ' + carClear.gap + 'px (' + Math.round(carClear.kmh) + 'km/h)');
+ok('3인칭: 차와 하단 조작부 사이 여유 (20px 이상)', carClear.gap >= 20, carClear.gap);
+console.log('    · 3인칭 차 화면 위치: y ' + Math.round(carClear.car.top) + '~' + Math.round(carClear.car.bottom) + ', 조작부 여유 ' + carClear.gap + 'px (' + Math.round(carClear.kmh) + 'km/h)');
 
 /* ------------------------------ 5. 핸들 조향 ------------------------------ */
 section('와이드 핸들 조향 (드래그 · 회전 · 복원)');
@@ -810,10 +812,11 @@ const stopClear = await manual.evaluate(() => {
   }
   const car = { left: box.x, top: box.y, right: box.right, bottom: box.bottom };
   const inter = (a, b) => !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
-  return { car, hits: Object.entries(rects).filter(([, r]) => inter(car, r)).map(([k]) => k), gap: Math.round(rects.gauge.top - car.bottom) };
+  const rowTop = Math.min(rects.wheel.top, rects.brake.top, rects.nitro.top);
+  return { car, hits: Object.entries(rects).filter(([, r]) => inter(car, r)).map(([k]) => k), gap: Math.round(rowTop - car.bottom) };
 });
 ok('정지 상태에서도 차가 하단 HUD에 안 가림', stopClear.hits.length === 0, stopClear);
-ok('정지 상태 차와 게이지 사이 여유 (12px 이상)', stopClear.gap >= 12, stopClear.gap);
+ok('정지 상태 차와 하단 조작부 사이 여유 (12px 이상)', stopClear.gap >= 12, stopClear.gap);
 
 /* GAS 페달 홀드 → 실제 가속 */
 const gb = await (await manual.$('#btnGas')).boundingBox();

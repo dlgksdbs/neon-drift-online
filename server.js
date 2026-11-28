@@ -19,6 +19,7 @@ const MAX_PLAYERS = 6;
 const TICK_MS = 66;          // 위치 브로드캐스트 주기 (~15Hz)
 const COUNTDOWN_MS = 3200;
 const ROOM_TTL_MS = 45 * 60 * 1000;
+const RESUME_GRACE_MS = 20000;   // 레이스 중 연결이 끊긴 플레이어를 기다려 주는 시간
 
 const app = express();
 app.use(express.json());
@@ -114,8 +115,17 @@ function broadcast(room, msg, exceptId = null) {
   const data = JSON.stringify(msg);
   for (const p of room.players.values()) {
     if (p.id === exceptId) continue;
-    if (p.ws.readyState === 1) p.ws.send(data);
+    if (p.ws && p.ws.readyState === 1) p.ws.send(data);
   }
+}
+
+/* 레이스 시작 그리드(서버가 정한 순서) — 클라이언트가 이걸로 차량을 세운다 */
+function gridPayload(room) {
+  return [...room.players.values()].map((p, i) => ({
+    id: p.id, name: p.name, car: p.car, color: p.color,
+    gridIndex: p.gridIndex === undefined ? i : p.gridIndex,
+    host: !!p.host, ready: !!p.ready, connected: !!p.ws,
+  }));
 }
 
 function sysSend(ws, type, payload = {}) {
@@ -145,10 +155,18 @@ function sanitizeCar(car) {
 
 function leaveRoom(ws) {
   const room = rooms.get(ws.roomCode);
+  ws.roomCode = null;
   if (!room) return;
   const p = room.players.get(ws.pid);
-  if (p) room.players.delete(ws.pid);
-  ws.roomCode = null;
+  // 이 소켓이 그 플레이어의 소켓이 아니면(재접속으로 교체됐으면) 아무것도 하지 않는다
+  if (!p || p.ws !== ws) return;
+  // 레이스 중 일시 끊김: 바로 내보내지 않고 자리를 잡아 둔다(재접속하면 이어서 달린다)
+  if (room.state === 'countdown' || room.state === 'racing') {
+    p.ws = null;
+    p.disconnectedAt = Date.now();
+    return;
+  }
+  room.players.delete(ws.pid);
   if (room.players.size === 0) {
     cleanupRoom(room);
     return;
@@ -164,7 +182,7 @@ function leaveRoom(ws) {
 
 function startRace(room) {
   if (room.state !== 'lobby') return;
-  const players = [...room.players.values()];
+  const players = [...room.players.values()].filter((p) => p.ws && p.ws.readyState === 1);
   if (players.length < 1) return;
   room.state = 'countdown';
   room.startAt = Date.now() + COUNTDOWN_MS;
@@ -182,7 +200,7 @@ function startRace(room) {
     p.prog = new RaceProgress(TRACK, { laps: room.laps, s: gridS });
     p.elapsed = 0;
   });
-  broadcast(room, { type: 'countdown', startAt: room.startAt, laps: room.laps });
+  broadcast(room, { type: 'countdown', startAt: room.startAt, laps: room.laps, players: gridPayload(room) });
   broadcast(room, roomPayload(room));
   room.timer = setTimeout(() => {
     room.state = 'racing';
@@ -211,7 +229,9 @@ function tickRoom(room) {
   });
   broadcast(room, { type: 'state', t: Math.round(elapsed * 100) / 100, players });
 
-  if (room.finishOrder.length >= room.players.size) {
+  // 남아서 달리는 사람이 없으면(전원 완주 또는 연결 종료) 경기를 끝낸다
+  const pending = [...room.players.values()].filter((p) => !p.finished && p.ws && p.ws.readyState === 1);
+  if (room.finishOrder.length >= room.players.size || pending.length === 0) {
     room.state = 'done';
     if (room.tickTimer) clearInterval(room.tickTimer);
     room.tickTimer = null;
@@ -310,11 +330,15 @@ wss.on('connection', (ws) => {
         const x = Number(msg.x), z = Number(msg.z);
         if (!isFinite(x) || !isFinite(z)) break;
         if (Math.abs(x) > 1500 || Math.abs(z) > 1500) break;
-        const elapsed = (Date.now() - room.startAt) / 1000;
-        // 위치 순간이동(치트/글리치) 방지: 한 틱에 40m 이상 점프하면 무시
-        if (p.x !== undefined && Math.hypot(x - p.x, z - p.z) > 40) break;
+        const now = Date.now();
+        const elapsed = (now - room.startAt) / 1000;
+        // 위치 순간이동(치트/글리치) 방지: 한 틱에 40m 이상 점프하면 무시.
+        // 다만 1초 넘게 새 위치가 없었으면(재접속·백그라운드·렉) 한 번은 받아 준다.
+        const stale = now - (p.lastPosAt || 0) > 1000;
+        if (!stale && p.x !== undefined && Math.hypot(x - p.x, z - p.z) > 40) break;
+        p.lastPosAt = now;
         p.x = x; p.z = z;
-        p.h = Number(msg.h) || 0;
+        p.h = Number.isFinite(Number(msg.h)) ? Number(msg.h) : 0;
         p.speed = Number(msg.speed) || 0;
         p.boost = !!msg.boost;
         const near = nearest(TRACK, x, z, p.hint);
@@ -343,6 +367,50 @@ wss.on('connection', (ws) => {
         break;
       }
 
+      case 'resume': {
+        // 끊겼다가 돌아온 소켓을 원래 플레이어 자리에 다시 붙인다
+        const code = String(msg.code || '').toUpperCase().trim();
+        const oldId = String(msg.id || '');
+        const r = rooms.get(code);
+        if (!r) { sysSend(ws, 'resume-failed', { message: '방이 닫혔어. 새 방을 만들어줘.' }); break; }
+        const p = r.players.get(oldId);
+        if (!p) { sysSend(ws, 'resume-failed', { message: '방에서 나갔어. 다시 입장해줘.' }); break; }
+        if (p.ws && p.ws !== ws && p.ws.readyState === 1) { sysSend(ws, 'resume-failed', { message: '이미 접속 중이야.' }); break; }
+        if (ws.roomCode && ws.roomCode !== r.code) leaveRoom(ws);
+        p.ws = ws;
+        p.disconnectedAt = 0;
+        p.lastPosAt = 0;          // 다음 위치는 거리 검사 없이 받는다
+        p.hint = -1;
+        ws.pid = p.id;
+        ws.roomCode = r.code;
+        sysSend(ws, 'resumed', {
+          id: p.id, code: r.code, state: r.state, startAt: r.startAt,
+          laps: r.laps, hostId: r.hostId, players: gridPayload(r),
+        });
+        if (r.state === 'lobby') broadcast(r, roomPayload(r));
+        break;
+      }
+
+      case 'rematch': {
+        // 끝난 방을 다시 대기 상태로 되돌린다(방장만)
+        if (!room) break;
+        if (room.hostId !== ws.pid) { sysSend(ws, 'error', { message: '방장만 다시 시작할 수 있어.' }); break; }
+        if (room.state !== 'done') break;
+        if (room.tickTimer) clearInterval(room.tickTimer);
+        room.tickTimer = null;
+        if (room.timer) clearTimeout(room.timer);
+        room.timer = null;
+        room.state = 'lobby';
+        room.startAt = 0;
+        room.finishOrder = [];
+        for (const p of room.players.values()) {
+          p.finished = false; p.finishTime = null; p.ready = false; p.prog = null; p.elapsed = 0;
+        }
+        broadcast(room, { type: 'rematch', code: room.code });
+        broadcast(room, roomPayload(room));
+        break;
+      }
+
       case 'leave':
         leaveRoom(ws);
         break;
@@ -360,11 +428,19 @@ wss.on('connection', (ws) => {
 const sweep = setInterval(() => {
   const now = Date.now();
   for (const room of [...rooms.values()]) {
+    // 재접속을 기다리던 시간이 지나면 자리를 비운다
+    for (const p of [...room.players.values()]) {
+      if (!p.ws && p.disconnectedAt && now - p.disconnectedAt > RESUME_GRACE_MS) {
+        room.players.delete(p.id);
+        broadcast(room, { type: 'left', id: p.id, name: p.name });
+        broadcast(room, roomPayload(room));
+      }
+    }
     if (room.players.size === 0 && now - room.createdAt > 60000) {
       cleanupRoom(room);
     } else if (now - room.createdAt > ROOM_TTL_MS) {
       broadcast(room, { type: 'error', message: '방 시간이 만료됐어.' });
-      for (const p of room.players.values()) { try { p.ws.close(); } catch (e) { /* noop */ } }
+      for (const p of room.players.values()) { try { if (p.ws) p.ws.close(); } catch (e) { /* noop */ } }
       room.players.clear();
       cleanupRoom(room);
     }

@@ -10,7 +10,8 @@
     "dev": "node server.js",
     "test": "node test/unit.js && node test/server.js",
     "test:mobile": "node test/mobile.js",
-    "test:all": "node test/unit.js && node test/server.js && node test/mobile.js"
+    "test:all": "node test/unit.js && node test/server.js && node test/mobile.js",
+    "test:friends": "node test/friends.js"
   },
   "engines": {
     "node": ">=18"

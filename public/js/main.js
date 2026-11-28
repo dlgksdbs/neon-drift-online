@@ -37,6 +37,7 @@ const app = {
   simTime: 0,
   racers: [],
   playerId: 'me',
+  myId: null,
   errors: [],
   fps: 60,
   lastFrame: 0,
@@ -213,10 +214,14 @@ function clearRacers() {
     view.scene.remove(r.mesh.group);
     r.mesh.group.traverse?.((o) => {
       if (o.geometry) o.geometry.dispose?.();
-      // 텍스처는 materials.js 캐시에서 공유하므로 지우지 않는다
+      // 텍스처는 materials.js 캐시에서 공유하므로 지우지 않는다.
+      // 차량 이름 라벨(Sprite)의 캔버스 텍스처는 차마다 새로 나오므로 여기서 해제한다.
       if (o.material) {
-        if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose?.());
-        else o.material.dispose?.();
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats) {
+          if (m && m.isSpriteMaterial && m.map) m.map.dispose?.();
+          m.dispose?.();
+        }
       }
     });
   }
@@ -657,6 +662,7 @@ function updateRemote(r, dt) {
 function sendPos() {
   const me = app.racers.find((r) => r.isMe);
   if (!me || !app.net || !app.net.connected) return;
+  if (!Number.isFinite(me.car.x) || !Number.isFinite(me.car.z)) return;   // NaN 좌표는 보내지 않는다
   app.net.send({
     type: 'pos',
     x: Math.round(me.car.x * 100) / 100,
@@ -673,24 +679,52 @@ function setupNetHandlers() {
   const net = app.net;
   net.on('error', (msg) => toast(msg.message || '오류가 발생했어', 2600));
   net.on('close', () => {
-    if (app.mode === 'multi') {
-      toast('서버 연결이 끊어졌어', 2600);
-      app.mode = 'menu';
-      app.phase = 'idle';
-      hud.hide();
-      clearRacers();
-      hideAllScreens();
-      show('menu');
+    if (app.mode !== 'multi') return;
+    // 레이스 중에는 바로 메뉴로 튕겨내지 않는다 — 화면을 유지하고 재접속을 시도한다
+    if (app.phase === 'countdown' || app.phase === 'racing') {
+      toast('연결이 잠깐 끊겼어 · 다시 연결 중…', 2600);
+      tryResume();
+      return;
     }
+    if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
+    leaveMultiToMenu('서버 연결이 끊어졌어');
   });
   net.on('room', (msg) => {
+    if (app.mode !== 'multi') return;
     app.room = msg;
     app.isHost = msg.hostId === net.id;
     renderLobby(msg);
   });
+  net.on('resumed', (msg) => {
+    // 재접속 성공: 원래 플레이어 자리로 돌아왔다
+    if (msg.id) net.id = msg.id;
+    app.room = { ...(app.room || {}), code: msg.code, hostId: msg.hostId, state: msg.state, laps: msg.laps, players: msg.players || (app.room && app.room.players) || [] };
+    app.isHost = msg.hostId === net.id;
+    resumeTries = 0;
+    if (msg.state === 'countdown' || msg.state === 'racing') {
+      // 이미 달리던 중이면 그 차·기록을 그대로 두고 이어서 달린다(새로 세우지 않는다)
+      if (!app.racers.length || !app.racers.some((r) => r.isMe)) startMultiRace(app.room.players, { keepPhase: true });
+      hideAllScreens();
+      hud.show();
+      $('countdown').classList.add('hidden');
+      app.phase = 'racing';
+      toast('다시 연결됐어!', 1600);
+    } else {
+      toast('다시 연결됐어!', 1600);
+      renderLobby(app.room);
+    }
+  });
+  net.on('resume-failed', (msg) => {
+    resumeTries = 99;
+    leaveMultiToMenu(msg.message || '다시 연결하지 못했어');
+  });
   net.on('countdown', (msg) => {
-    // 참가자(비방장)도 같은 그리드로 차량을 만든다
-    if (app.mode === 'multi' && app.racers.length === 0 && app.room) startMultiRace(app.room);
+    if (app.mode !== 'multi') return;
+    // 서버가 정한 그리드로 모든 참가자가 같은 차량을 세운다
+    const players = (msg.players && msg.players.length) ? msg.players : (app.room && app.room.players) || [];
+    const nextIds = players.map((p) => p.id).join('|');
+    const curIds = app.racers.map((r) => r.id).join('|');
+    if (nextIds !== curIds) startMultiRace(players);
     app.countdownStart = performance.now() + Math.max(0, msg.startAt - Date.now());
     hideAllScreens();
     hud.show();
@@ -700,21 +734,34 @@ function setupNetHandlers() {
     app.resultsShown = false;
   });
   net.on('race', () => {
+    // 방 상태 메시지가 늦게 와도 로비가 게임 화면을 덮지 않도록 한 번 더 정리한다
+    hideAllScreens();
+    hud.show();
     $('countdown').classList.add('hidden');
     app.phase = 'racing';
     app.simTime = 0;
     hud.message('GO!', 700);
   });
+  net.on('rematch', () => {
+    app.resultsShown = false;
+    app.phase = 'idle';
+    hide('results');
+    hud.hide();
+    clearRacers();
+  });
   net.on('state', (msg) => {
     const now = performance.now();
+    if (!Array.isArray(msg.players)) return;
     for (const ps of msg.players) {
-      if (ps.id === net.id) continue;
+      if (!ps || ps.id === net.id) continue;
       const r = app.racers.find((x) => x.id === ps.id);
       if (!r) continue;
-      r.netBuffer.push({ at: now, x: ps.x, z: ps.z, h: ps.h, speed: ps.speed, boost: ps.boost });
+      const x = Number(ps.x), z = Number(ps.z);
+      if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+      r.netBuffer.push({ at: now, x, z, h: Number.isFinite(Number(ps.h)) ? Number(ps.h) : 0, speed: Number.isFinite(Number(ps.speed)) ? Number(ps.speed) : 0, boost: !!ps.boost });
       if (r.netBuffer.length > 30) r.netBuffer.shift();
-      r.prog.lap = ps.lap;
-      const q = nearest(TRACK, ps.x, ps.z, r.car._hint);
+      if (Number.isFinite(Number(ps.lap))) r.prog.lap = Number(ps.lap);
+      const q = nearest(TRACK, x, z, r.car._hint);
       r.car._hint = q.index;
       r.prog.s = q.s;
       r.prog.sPrev = q.s;
@@ -732,8 +779,15 @@ function setupNetHandlers() {
 }
 
 function renderLobby(room) {
-  show('lobby');
-  hide('menu');
+  // 방 상태가 와도 레이스 중이면 화면을 띄우지 않는다(예전 버그: 시작하자마자 로비가
+  // 게임 화면을 덮어 "시작하고 튕기는" 것처럼 보였다)
+  const racing = app.phase === 'countdown' || app.phase === 'racing' || app.phase === 'paused';
+  const inLobby = room.state === 'lobby' || room.state === undefined;
+  if (inLobby && !racing) {
+    show('lobby');
+    hide('menu');
+    hide('results');
+  }
   $('roomCard').classList.remove('hidden');
   $('roomCode').textContent = room.code;
   $('codeInput').value = room.code;
@@ -751,11 +805,11 @@ function renderLobby(room) {
   const imHost = room.hostId === app.net.id;
   const meP = room.players.find((p) => p.id === app.net.id);
   $('btnStart').style.display = imHost ? 'flex' : 'none';
-  $('btnReady').style.display = imHost ? 'none' : 'flex';
+  $('btnReady').style.display = imHost || racing ? 'none' : 'flex';
   if (meP) $('btnReady').textContent = meP.ready ? '준비 취소' : '준비 완료';
   if (imHost) {
-    $('btnStart').disabled = room.players.length < 1;
-    $('btnStart').textContent = `레이스 시작 (${room.players.length}명)`;
+    $('btnStart').disabled = racing || room.players.length < 1;
+    $('btnStart').textContent = racing ? '레이스 중…' : `레이스 시작 (${room.players.length}명)`;
   }
 }
 
@@ -778,6 +832,46 @@ async function enterMulti() {
   }
 }
 
+/* 레이스 중 연결이 끊겼을 때: 메뉴로 튕기지 않고 몇 번 다시 붙여 본다 */
+let resumeTries = 0;
+let resumeTimer = null;
+async function tryResume() {
+  const room = app.room;
+  const myId = app.myId || (app.net && app.net.id);
+  if (!room || !myId || resumeTries >= 4) {
+    leaveMultiToMenu('다시 연결하지 못했어');
+    return;
+  }
+  resumeTries++;
+  if (resumeTimer) clearTimeout(resumeTimer);
+  resumeTimer = setTimeout(async () => {
+    resumeTimer = null;
+    if (app.mode !== 'multi' || !app.room) return;
+    try {
+      await app.net.connect();
+      app.net.send({ type: 'resume', code: app.room.code, id: myId });
+    } catch (e) {
+      tryResume();
+    }
+  }, 700 * resumeTries);
+}
+
+function leaveMultiToMenu(message) {
+  if (message) toast(message, 2600);
+  app.mode = 'menu';
+  app.phase = 'idle';
+  app.room = null;
+  app.isHost = false;
+  app.resultsShown = false;
+  resumeTries = 0;
+  if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
+  hud.hide();
+  hide('countdown');
+  clearRacers();
+  hideAllScreens();
+  show('menu');
+}
+
 async function createRoom() {
   app.nick = ($('nickInput').value || '').trim() || '드라이버';
   localStorage.setItem('neon_nick', app.nick);
@@ -793,14 +887,15 @@ async function joinRoom() {
   app.net.send({ type: 'join', code, name: app.nick, car: app.carKey, color: app.color });
 }
 
-function startMultiRace(room) {
+function startMultiRace(players, opts = {}) {
+  const list = Array.isArray(players) && players.length ? players : (app.room && app.room.players) || [];
   clearRacers();
   app.playerId = app.net.id;
-  const players = room.players;
-  players.forEach((p, i) => {
+  app.myId = app.net.id;
+  list.forEach((p, i) => {
     makeRacer({
       id: p.id, name: p.name, car: p.car, color: p.color, isMe: p.id === app.net.id,
-      gridIndex: i, label: p.name,
+      gridIndex: p.gridIndex === undefined ? i : p.gridIndex, label: p.name,
     });
   });
   // 원격 레이서 플래그 (위치는 네트워크가 정한다: 충돌에서 밀리지 않음)
@@ -808,7 +903,7 @@ function startMultiRace(room) {
     r.isRemote = !r.isMe;
     if (r.isRemote) r.car.collisionInvMass = 0;
   }
-  beginCountdown();
+  if (!opts.keepPhase) beginCountdown();
 }
 
 /* ----------------------------- 결과 화면 ----------------------------- */
@@ -905,11 +1000,15 @@ function backToMenu() {
   app.phase = 'idle';
   app.mode = 'menu';
   app.resultsShown = false;
+  resumeTries = 0;
+  if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
   hud.hide();
   hide('countdown');
   releaseAll();
   clearRacers();
   if (app.net) { try { app.net.send({ type: 'leave' }); } catch (e) { /* noop */ } }
+  app.room = null;
+  app.isHost = false;
   hideAllScreens();
   show('menu');
 }
@@ -1006,10 +1105,12 @@ function buildMenu() {
     app.net.send({ type: 'ready', ready: !(meP && meP.ready) });
   });
   $('btnStart').addEventListener('click', () => {
-    if (app.room && app.room.players.length >= 1) {
-      app.net.send({ type: 'start' });
-      startMultiRace(app.room);
-    }
+    if (app.mode !== 'multi' || !app.room) return;
+    if (app.phase === 'countdown' || app.phase === 'racing') return;   // 중복 시작 방지
+    if (app.room.players.length < 1) return;
+    app.net.send({ type: 'start' });
+    // 버튼을 누른 즉시 내 화면도 시작(서버 countdown 메시지가 오면 그쪽 시간으로 맞춘다)
+    startMultiRace(app.room.players);
   });
   $('btnLobbyBack').addEventListener('click', () => backToMenu());
   $('btnCam').addEventListener('click', () => toggleCamera());
@@ -1018,8 +1119,15 @@ function buildMenu() {
   $('btnRestart').addEventListener('click', () => restartRace());
   $('btnQuit').addEventListener('click', () => backToMenu());
   $('btnAgain').addEventListener('click', () => {
-    if (app.mode === 'solo') startSolo();
-    else { app.resultsShown = false; backToMenu(); }
+    if (app.mode === 'solo') { app.resultsShown = false; startSolo(); return; }
+    if (app.mode === 'multi' && app.room) {
+      app.resultsShown = false;
+      if (app.isHost) app.net.send({ type: 'rematch' });
+      else toast('방장이 다시 시작할 때까지 기다려줘', 2200);
+      return;
+    }
+    app.resultsShown = false;
+    backToMenu();
   });
   $('btnToMenu').addEventListener('click', () => backToMenu());
 }
@@ -1039,7 +1147,8 @@ function updateMenuPreview() {
 function updateCountdown(now) {
   const el = $('cdText');
   const elapsed = (now - app.countdownStart) / 1000;
-  const step = Math.floor(elapsed);
+  // 서버 시각 기준이라 아직 미래일 수 있다(음수) — 그때도 '3'에서 시작하게 막아 둔다
+  const step = Math.max(0, Math.min(3, Math.floor(elapsed)));
   if (step !== app.countdownStep) {
     app.countdownStep = step;
     if (step <= 2) { el.textContent = String(3 - step); el.style.animation = 'none'; void el.offsetWidth; el.style.animation = ''; }

@@ -67,6 +67,7 @@ public/js/main.js            게임 루프·모드·카메라·입력
 test/unit.js                 물리·체크포인트·AI 단위 테스트
 test/server.js               HTTP·WebSocket 방/동기화/완주 테스트
 test/mobile.js               390×844 실제 렌더 테스트(핸들·순위표·UI 겹침·멀티 동기화)
+test/friends.js              친구 대결 통합 테스트(방 생성·초대 참가·시작·완주·재경기·재접속)
 ```
 
 ## 테스트
@@ -74,6 +75,7 @@ test/mobile.js               390×844 실제 렌더 테스트(핸들·순위표�
 ```bash
 npm test             # unit + server
 npm run test:mobile  # 모바일 실렌더 (스크린샷 → downloads/neon-drift-shots)
+npm run test:friends # 친구 대결 2브라우저 통합 (스크린샷 → downloads/neon-drift-friends)
 ```
 
 ## 배포 메모

@@ -113,42 +113,36 @@ html, body {
 #minimap { width: 100%; height: 100%; display: block; }
 
 #msgBox {
-  position: absolute; top: 42%; left: 50%; transform: translate(-50%, -50%);
-  padding: 10px 22px; border-radius: 14px; font-size: 26px; font-weight: 900; letter-spacing: 1px;
-  color: #fff; text-shadow: 0 0 20px rgba(34, 230, 255, .95);
+  /* 3인칭에서 내 차(화면 중앙~하단)를 가리지 않도록 상단 여백으로 올린다 */
+  position: absolute; top: calc(var(--safe-t) + 28%); left: 50%; transform: translateX(-50%);
+  padding: 7px 16px; border-radius: 13px; font-size: 18px; font-weight: 900; letter-spacing: .5px;
+  white-space: nowrap; color: #fff; text-shadow: 0 0 18px rgba(34, 230, 255, .95);
   background: rgba(6, 8, 22, .55); border: 1px solid rgba(34, 230, 255, .4);
   animation: pop .35s ease-out;
 }
-@keyframes pop { from { transform: translate(-50%, -50%) scale(.6); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+@keyframes pop { from { transform: translateX(-50%) scale(.72); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
 
+/* 속도·니트로 게이지: 화면 중앙 하단은 내 차 자리로 비워 두고
+   오른쪽(미니맵 아래) 기둥에 세로로 붙인다. 1인칭·3인칭 공통. */
 #gaugeWrap {
-  position: absolute; left: 0; right: 0; bottom: calc(var(--safe-b) + 148px);
-  display: flex; flex-direction: column; align-items: center; gap: 5px;
-}
-#speedBox { display: flex; align-items: baseline; gap: 4px; }
-#speedVal {
-  font-size: 40px; font-weight: 900; line-height: 1; color: #fff;
-  text-shadow: 0 0 16px rgba(34, 230, 255, .85), 0 2px 6px rgba(0, 0, 0, .8);
-  font-variant-numeric: tabular-nums;
-  transform-origin: center bottom; transition: transform .12s linear, text-shadow .12s linear;
-}
-#speedBox span { font-size: 11px; color: #7fc4ea; letter-spacing: 1px; }
-.bars { display: flex; flex-direction: column; gap: 4px; width: 208px; }
-
-/* 1인칭: 콕핏 대시보드가 화면 하단을 차지하므로 게이지(속도·니트로 잔량)를
-   미니맵 바로 아래 오른쪽으로 옮겨 계기판과 겹치지 않게 띄운다. */
-#hud.fp #gaugeWrap {
-  left: auto; right: 10px; top: calc(var(--safe-t) + 158px); bottom: auto;
-  width: 92px; gap: 3px; align-items: flex-end;
+  position: absolute; right: 10px; top: calc(var(--safe-t) + 158px);
+  width: 92px; display: flex; flex-direction: column; align-items: flex-end; gap: 3px;
   padding: 6px 8px 5px; border-radius: 12px;
   background: rgba(6, 10, 26, 0.58); border: 1px solid rgba(34, 230, 255, .22);
   box-shadow: 0 0 16px rgba(34, 230, 255, .12), inset 0 0 12px rgba(40, 120, 220, .12);
   backdrop-filter: blur(6px);
 }
-#hud.fp #speedBox { align-self: flex-end; }
-#hud.fp #speedVal { font-size: 28px; }
-#hud.fp #speedBox span { font-size: 9px; letter-spacing: .5px; }
-#hud.fp .bars { width: 100%; }
+#speedBox { display: flex; align-items: baseline; gap: 4px; align-self: flex-end; }
+#speedVal {
+  font-size: 28px; font-weight: 900; line-height: 1; color: #fff;
+  text-shadow: 0 0 16px rgba(34, 230, 255, .85), 0 2px 6px rgba(0, 0, 0, .8);
+  font-variant-numeric: tabular-nums;
+  transform-origin: center bottom; transition: transform .12s linear, text-shadow .12s linear;
+}
+#speedBox span { font-size: 9px; color: #7fc4ea; letter-spacing: .5px; }
+.bars { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+
+/* 1인칭은 게이지 자리가 같다(둘 다 오른쪽 기둥). 세부 크기만 살짝 조정. */
 #hud.fp .bar { height: 10px; }
 .bar {
   position: relative; height: 9px; border-radius: 6px; overflow: hidden;
@@ -406,18 +400,19 @@ input::placeholder { color: #5c7599; }
 #resultTable .dots { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; box-shadow: 0 0 6px currentColor; }
 
 #countdown {
-  position: absolute; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center;
-  pointer-events: none; background: radial-gradient(circle at 50% 50%, rgba(40, 10, 70, .28), transparent 62%);
+  position: absolute; inset: 0; z-index: 30; display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 22vh; pointer-events: none;
+  background: radial-gradient(circle at 50% 28%, rgba(40, 10, 70, .28), transparent 62%);
 }
 #countdown span {
-  font-size: 120px; font-weight: 900; color: #fff; letter-spacing: 4px;
+  font-size: clamp(64px, 22vw, 104px); font-weight: 900; color: #fff; letter-spacing: 4px;
   text-shadow: 0 0 30px rgba(34, 230, 255, .95), 0 0 80px rgba(255, 47, 176, .7);
   animation: cdPop .85s ease-out;
 }
 @keyframes cdPop { 0% { transform: scale(.4); opacity: 0; } 35% { transform: scale(1.12); opacity: 1; } 100% { transform: scale(1); opacity: .92; } }
 
 #toast {
-  position: absolute; left: 50%; bottom: calc(var(--safe-b) + 190px); transform: translateX(-50%);
+  position: absolute; left: 50%; bottom: calc(var(--safe-b) + 152px); transform: translateX(-50%);
   z-index: 40; padding: 9px 16px; border-radius: 11px; font-size: 12.5px; white-space: nowrap;
   background: rgba(8, 12, 28, .92); border: 1px solid rgba(80, 200, 255, .4); color: #d9f2ff;
   box-shadow: 0 0 20px rgba(34, 230, 255, .25);
@@ -439,9 +434,9 @@ input::placeholder { color: #5c7599; }
     --ctl: clamp(52px, 13vh, 66px);
     --wheel-h: clamp(98px, 27vh, 124px);
   }
-  #gaugeWrap { bottom: calc(var(--safe-b) + 118px); }
+  #gaugeWrap { top: calc(var(--safe-t) + 130px); width: 78px; padding: 4px 6px 4px; }
+  #speedVal { font-size: 22px; }
   #controls { height: calc(var(--safe-b) + 118px); }
-  #speedVal { font-size: 30px; }
   #actionPad { width: 148px; height: calc(var(--ctl) * 1.6); }
   #minimapWrap { width: 72px; height: 72px; top: calc(var(--safe-t) + 54px); }
   #board { width: 152px; top: calc(var(--safe-t) + 56px); padding: 4px 5px 5px; }
@@ -450,9 +445,9 @@ input::placeholder { color: #5c7599; }
   .logo h1 { font-size: 30px; }
   .screen { padding-top: calc(var(--safe-t) + 8px); }
   .menuScroll { max-width: 560px; }
-  .bars { width: 170px; }
-  #hud.fp #gaugeWrap { top: calc(var(--safe-t) + 130px); width: 78px; padding: 4px 6px 4px; }
-  #hud.fp #speedVal { font-size: 22px; }
+  .bars { width: 100%; }
   #hud.fp .bars { width: 100%; }
   #btnGas { width: calc(var(--ctl) * 0.94); border-radius: 16px; font-size: 12px; }
+  #msgBox { top: calc(var(--safe-t) + 22%); font-size: 15px; padding: 5px 12px; }
+  #countdown { padding-top: 14vh; }
 }
